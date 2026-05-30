@@ -1,0 +1,32 @@
+[package]
+name = "rusty-math-tutor"
+version = "0.1.0"
+edition = "2021"
+description = "A console math tutor (K-8) with pleasing random transitions between problems"
+license = "GPL-3.0"
+
+[[bin]]
+name = "tutor"
+path = "src/main.rs"
+
+[dependencies]
+# TUI — same lightweight stack as console-music-player.
+# Pure terminal cell rendering: no GPU, friendly to slow hardware.
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Random problem + transition selection.
+rand = "0.8"
+
+# Error handling.
+anyhow = "1"
+
+# Persisted configuration (per-grade number ranges, layout preference).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
