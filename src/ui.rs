@@ -460,25 +460,31 @@ fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
     let heading = crate::motivation::heading(app.current.op);
 
     // Each tagged line carries a style: 0 bullet, 1 code header, 2 code, 3 why.
-    let panel_w = area.width.saturating_sub(4).min(64).max(24).min(area.width);
+    let panel_w = area.width.saturating_sub(4).min(72).max(24).min(area.width);
     let wrap_w = panel_w.saturating_sub(4);
     let mut lines: Vec<(String, u8)> = Vec::new();
     for item in &app.why_items {
-        for (i, line) in wrap_text(item, wrap_w.saturating_sub(2)).iter().enumerate() {
-            lines.push((if i == 0 { format!("• {}", line) } else { format!("  {}", line) }, 0));
+        for line in wrap_prefixed("• ", "  ", item, wrap_w) {
+            lines.push((line, 0));
         }
     }
     // A code peek for budding programmers.
     if let Some((code, why)) = &app.why_code {
         lines.push((String::new(), 0));
-        lines.push(("For future coders — a line from this app:".to_string(), 1));
+        for line in wrap_text("For future coders — a line from this app:", wrap_w) {
+            lines.push((line, 1));
+        }
         lines.push((format!("  {}", code), 2));
-        for (i, line) in wrap_text(why, wrap_w.saturating_sub(2)).iter().enumerate() {
-            lines.push((if i == 0 { format!("  Why it matters: {}", line) } else { format!("    {}", line) }, 3));
+        // Prefix-aware wrap: "Why it matters: …" stays inside the panel.
+        for line in wrap_prefixed("  Why it matters: ", "    ", why, wrap_w) {
+            lines.push((line, 3));
         }
     }
 
-    let panel_h = (lines.len() as u16 + 4).min(area.height.saturating_sub(2)).max(7);
+    // Grow to fit the content (heading + gap + lines + footer + borders), but
+    // never taller than the available area — the leftover scrolls.
+    let wanted_h = lines.len() as u16 + 5;
+    let panel_h = wanted_h.min(area.height.saturating_sub(2)).max(7);
     let panel_x = area.left() + area.width.saturating_sub(panel_w) / 2;
     let panel_y = area.top() + area.height.saturating_sub(panel_h) / 2;
     let panel = Rect {
@@ -504,11 +510,18 @@ fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
 
     put_str(buf, inner.left(), inner.top(), clip(heading, inner.width), Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
 
-    let mut y = inner.top() + 2;
-    for (line, tag) in &lines {
-        if y >= inner.bottom().saturating_sub(1) {
-            break;
-        }
+    // Visible content window: rows between the gap under the heading and the
+    // footer.  Anything beyond scrolls, controlled by Up/Down.
+    let first_row = inner.top() + 2;
+    let footer_row = inner.bottom().saturating_sub(1);
+    let visible = footer_row.saturating_sub(first_row) as usize;
+    let total = lines.len();
+    let max_scroll = total.saturating_sub(visible);
+    app.why_max_scroll.set(max_scroll);
+    let scroll = app.why_scroll.min(max_scroll);
+
+    let mut y = first_row;
+    for (line, tag) in lines.iter().skip(scroll).take(visible) {
         let style = match tag {
             1 => Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
             2 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
@@ -519,32 +532,60 @@ fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
         y += 1;
     }
 
-    put_str(buf, inner.left(), inner.bottom().saturating_sub(1), "Y or Esc: close", Style::default().fg(Color::Gray));
+    // Scroll affordances.
+    let scrollable = max_scroll > 0;
+    if scroll > 0 {
+        put_str(buf, inner.right().saturating_sub(7), inner.top() + 1, "↑ more", Style::default().fg(Color::LightCyan));
+    }
+    if scroll < max_scroll {
+        put_str(buf, inner.right().saturating_sub(7), footer_row, "↓ more", Style::default().fg(Color::LightCyan));
+    }
+
+    let footer = if scrollable { "Y/Esc: close    ↑↓ scroll" } else { "Y or Esc: close" };
+    put_str(buf, inner.left(), footer_row, footer, Style::default().fg(Color::Gray));
 }
 
 /// Greedy word-wrap of `s` into lines no wider than `width` characters.
 fn wrap_text(s: &str, width: u16) -> Vec<String> {
-    let width = width.max(1) as usize;
-    let mut lines = Vec::new();
+    wrap_prefixed("", "", s, width)
+}
+
+/// Word-wrap `text` so that, once `first` is prepended to the first line and
+/// `cont` to every continuation line, **no produced line exceeds `width`
+/// columns**.  The prefixes are counted against the budget, which is the part
+/// the plain wrapper missed.  A word longer than the budget still gets its own
+/// line (it can only be clipped, never silently dropped).
+fn wrap_prefixed(first: &str, cont: &str, text: &str, width: u16) -> Vec<String> {
+    let first_budget = (width as usize).saturating_sub(first.chars().count()).max(1);
+    let cont_budget = (width as usize).saturating_sub(cont.chars().count()).max(1);
+
+    let mut bodies: Vec<String> = Vec::new();
     let mut line = String::new();
-    for word in s.split_whitespace() {
+    let mut budget = first_budget;
+    for word in text.split_whitespace() {
         if line.is_empty() {
             line = word.to_string();
-        } else if line.chars().count() + 1 + word.chars().count() <= width {
+        } else if line.chars().count() + 1 + word.chars().count() <= budget {
             line.push(' ');
             line.push_str(word);
         } else {
-            lines.push(std::mem::take(&mut line));
+            bodies.push(std::mem::take(&mut line));
             line = word.to_string();
+            budget = cont_budget; // every line after the first uses cont width
         }
     }
     if !line.is_empty() {
-        lines.push(line);
+        bodies.push(line);
     }
-    if lines.is_empty() {
-        lines.push(String::new());
+    if bodies.is_empty() {
+        bodies.push(String::new());
     }
-    lines
+
+    bodies
+        .into_iter()
+        .enumerate()
+        .map(|(i, body)| if i == 0 { format!("{}{}", first, body) } else { format!("{}{}", cont, body) })
+        .collect()
 }
 
 fn feedback_banner(app: &App) -> Option<(String, Color)> {
@@ -1042,5 +1083,40 @@ fn tail(s: &str, width: u16) -> String {
         s.to_string()
     } else {
         s.chars().skip(count - width).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_prefixed_keeps_every_line_within_width() {
+        // The guarantee holds once the width clears the prefix plus the longest
+        // word — the Why panel's real operating range.  (Below that, greedy
+        // wrap can't split a word and the render pass clips as a safety net.)
+        let why = "Dividing the width by the hops spaces the number-line stops out evenly.";
+        for width in [30u16, 40, 50, 60] {
+            let lines = wrap_prefixed("  Why it matters: ", "    ", why, width);
+            assert!(lines.len() > 1, "text should wrap onto multiple lines at width {}", width);
+            for line in &lines {
+                assert!(
+                    line.chars().count() <= width as usize,
+                    "line {:?} ({} cols) exceeds width {}",
+                    line,
+                    line.chars().count(),
+                    width
+                );
+            }
+            assert!(lines[0].contains("Why it matters:"));
+        }
+    }
+
+    #[test]
+    fn wrap_text_handles_blank_and_single_word() {
+        assert_eq!(wrap_text("", 10), vec![String::new()]);
+        // A word longer than the width still survives as its own line.
+        let lines = wrap_text("supercalifragilistic", 8);
+        assert_eq!(lines.len(), 1);
     }
 }

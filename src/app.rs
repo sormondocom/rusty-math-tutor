@@ -141,6 +141,10 @@ pub struct App {
     pub why_items: Vec<String>,
     /// An optional "for future coders" peek: (code line, why it matters).
     pub why_code: Option<(String, String)>,
+    /// First visible line when the Why panel scrolls.
+    pub why_scroll: usize,
+    /// Max scroll offset, written by the renderer each frame so input can clamp.
+    pub why_max_scroll: std::cell::Cell<usize>,
     /// Teacher's own anecdotes, merged into the Why list.
     pub why_extras: crate::motivation::Extras,
 
@@ -205,6 +209,8 @@ impl App {
             why_active: false,
             why_items: Vec::new(),
             why_code: None,
+            why_scroll: 0,
+            why_max_scroll: std::cell::Cell::new(0),
             why_extras: crate::motivation::Extras::load(),
             teacher_authed: false,
             teacher_view: TeacherView::Anecdotes,
@@ -594,6 +600,16 @@ impl App {
             return;
         }
 
+        // While the Why panel is open, Up/Down scroll long lists.
+        if self.why_active && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            if key.code == KeyCode::Up {
+                self.why_scroll = self.why_scroll.saturating_sub(1);
+            } else {
+                self.why_scroll = (self.why_scroll + 1).min(self.why_max_scroll.get());
+            }
+            return;
+        }
+
         // Help toggle works any time; opening always starts at the first method
         // with the answer hidden (hint-first).
         if matches!(key.code, KeyCode::Char('h') | KeyCode::Char('H')) {
@@ -670,6 +686,7 @@ impl App {
         let op = self.current.op;
         self.why_items = crate::motivation::pick(op, &self.why_extras, &mut self.rng, 4);
         self.why_code = crate::motivation::pick_code(op, &mut self.rng);
+        self.why_scroll = 0;
     }
 
     // -- session helpers ----------------------------------------------------
@@ -895,6 +912,41 @@ mod tests {
                 assert_eq!(computed, p.answer);
             }
         }
+    }
+
+    /// The Why panel must show all content when there's room (no dropped
+    /// continuation line), and report a scroll range when there isn't.
+    #[test]
+    fn why_panel_fits_when_tall_and_scrolls_when_short() {
+        let make = || {
+            let mut app = App::new(Config::default());
+            app.menu_ops = [true, false, false, false];
+            app.start_session(false);
+            app.why_active = true;
+            app.why_items = vec![
+                "Totalling up the cost of everything in your shopping cart".to_string(),
+                "Adding up calories so astronauts pack enough food for space".to_string(),
+                "Adding the fuel in each rocket stage to reach orbit".to_string(),
+                "Summing the weights of cargo so a plane stays balanced".to_string(),
+            ];
+            app.why_code = Some((
+                "self.progress += 1.0 / duration;".to_string(),
+                "Adding a little each frame is how one problem smoothly melts into the next.".to_string(),
+            ));
+            app
+        };
+
+        // Plenty of height: everything fits, nothing scrolls.
+        let app = make();
+        let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        term.draw(|f| ui::draw(f, &app)).unwrap();
+        assert_eq!(app.why_max_scroll.get(), 0, "tall panel should not need scrolling");
+
+        // Cramped height: the overflow becomes scrollable.
+        let app = make();
+        let mut term = Terminal::new(TestBackend::new(80, 13)).unwrap();
+        term.draw(|f| ui::draw(f, &app)).unwrap();
+        assert!(app.why_max_scroll.get() > 0, "short panel should scroll");
     }
 
     #[test]
