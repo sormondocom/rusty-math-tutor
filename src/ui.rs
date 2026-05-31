@@ -18,6 +18,7 @@ use crate::duck::Pose;
 use crate::font;
 use crate::problem::{Op, Problem};
 use crate::strategy::{Strategy, Viz};
+use crate::units::{Theme, UnitProblem};
 use crate::{duck, problem, strategy};
 
 /// Deduction Duck's feathers.
@@ -47,6 +48,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::Teacher => draw_teacher(f, app, area),
         Screen::Cinematic => draw_cinematic(f, app, area),
         Screen::Practice | Screen::Challenge => draw_session(f, app, area),
+        Screen::Experiment => draw_experiment(f, app, area),
     }
 }
 
@@ -83,6 +85,291 @@ fn draw_cinematic(f: &mut Frame, app: &App, area: Rect) {
         }
     }
     put_str(buf, center(area, 21), area.bottom().saturating_sub(1), "press any key to skip", Style::default().fg(Color::DarkGray));
+}
+
+// ---------------------------------------------------------------------------
+// Units of Measure (a card shown inside Practice / Challenge sessions)
+// ---------------------------------------------------------------------------
+
+/// Draw a measurement card: question on top, the answer to type in the middle,
+/// and the themed prop at the bottom.  Used live and for transition capture.
+pub fn render_unit_card(area: Rect, buf: &mut Buffer, p: &UnitProblem, input: &str, banner: Option<(String, Color)>) {
+    let accent = theme_color(p.theme);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent))
+        .title(" Units of Measure ")
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    // Question, word-wrapped and centred near the top.
+    let qlines = wrap_text(&p.question, inner.width.saturating_sub(4));
+    let mut y = inner.top() + 1;
+    for line in qlines.iter().take(4) {
+        put_str(buf, center(inner, line.chars().count() as u16), y, line, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        y += 1;
+    }
+
+    // The big answer the student types, with its unit beneath.
+    let ans = if input.is_empty() { "?" } else { input };
+    let ay = inner.top() + inner.height / 2;
+    font::draw_text(buf, center(inner, font::text_width(ans)), ay.saturating_sub(2), ans, answer_style(input));
+    put_str(buf, center(inner, p.unit_label.chars().count() as u16), ay + font::GLYPH_H.saturating_sub(2), &p.unit_label, Style::default().fg(accent).add_modifier(Modifier::BOLD));
+
+    if let Some((text, color)) = banner {
+        put_str(buf, center(inner, text.chars().count() as u16), ay + font::GLYPH_H + 1, text, Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
+
+    // Static themed prop at the bottom (the duck gag animates over this).
+    let (px, py, prop) = prop_placement(inner, p.theme);
+    for (i, line) in prop.iter().enumerate() {
+        put_str(buf, px, py + i as u16, line, Style::default().fg(accent));
+    }
+
+    let hints = "Enter check    H help duck    Esc menu";
+    put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1), hints, Style::default().fg(Color::DarkGray));
+}
+
+fn theme_color(theme: Theme) -> Color {
+    match theme {
+        Theme::Cup => Color::LightYellow,
+        Theme::Pool => Color::LightBlue,
+        Theme::Bottle => Color::LightCyan,
+        Theme::Scale => Color::LightMagenta,
+        Theme::Ruler => Color::LightGreen,
+        Theme::Coin => Color::Rgb(255, 200, 40), // gold
+    }
+}
+
+/// The little ASCII prop for a theme.
+fn theme_prop(theme: Theme) -> &'static [&'static str] {
+    match theme {
+        Theme::Cup => &[" ___", "|  |)", "|__|"],
+        Theme::Pool => &["~~~~~~~~", "~~~~~~~~"],
+        Theme::Bottle => &[" __ ", "|  |", "|~~|", "|__|"],
+        Theme::Scale => &[" _^_ ", "/ | \\", "====="],
+        Theme::Ruler => &["|.|.|.|.|"],
+        Theme::Coin => &["( $ )", "(===)", "(===)"],
+    }
+}
+
+/// The onomatopoeia the duck makes diving into a prop.
+fn theme_splash(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Cup | Theme::Pool | Theme::Bottle => "SPLASH!",
+        Theme::Scale => "THUD!",
+        Theme::Ruler => "BONK!",
+        Theme::Coin => "CHA-CHING!",
+    }
+}
+
+/// Bottom-centred placement of the prop within `inner`.
+fn prop_placement(inner: Rect, theme: Theme) -> (u16, u16, &'static [&'static str]) {
+    let prop = theme_prop(theme);
+    let w = prop.iter().map(|l| l.chars().count()).max().unwrap_or(1) as u16;
+    let x = center(inner, w);
+    let y = inner.bottom().saturating_sub(prop.len() as u16 + 1);
+    (x, y, prop)
+}
+
+/// The silly gag: Deduction Duck hops in from the side, splashes into the prop,
+/// then pops back out — on a loop.
+fn draw_duck_gag(buf: &mut Buffer, inner: Rect, theme: Theme, frame: u64) {
+    let (px, py, prop) = prop_placement(inner, theme);
+    let pw = prop.iter().map(|l| l.chars().count()).max().unwrap_or(1) as u16;
+    let cx = (px + pw / 2) as f32;
+    let top = py as f32;
+    let color = theme_color(theme);
+    let mini = "~(o>"; // tiny duck facing right
+
+    const CYCLE: u64 = 96;
+    let t = (frame % CYCLE) as f32 / CYCLE as f32;
+    let land_x = cx - 2.0;
+
+    if t < 0.45 {
+        // Arc in from the left edge toward the prop.
+        let p = t / 0.45;
+        let start_x = inner.left() as f32 + 1.0;
+        let x = start_x + (land_x - start_x) * p;
+        let y = top - 1.0 - (p * std::f32::consts::PI).sin() * 5.0;
+        put_float(buf, x, y, mini, Style::default().fg(color));
+    } else if t < 0.58 {
+        // Splash! — the word above, droplets down on the water rows.
+        let word = theme_splash(theme);
+        put_float(buf, cx - word.chars().count() as f32 / 2.0, top - 2.0, word, Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD));
+        for (dx, dy) in [(-4.0, 0.0), (4.0, 0.0), (-3.0, 1.0), (3.0, 1.0)] {
+            put_float(buf, cx + dx, top + dy, "°", Style::default().fg(Color::LightCyan));
+        }
+    } else {
+        // Pop back up out of the prop.
+        let p = (t - 0.58) / 0.42;
+        let y = top - 1.0 - (p * std::f32::consts::PI).sin() * 4.0;
+        put_float(buf, land_x, y, mini, Style::default().fg(color));
+    }
+}
+
+/// Place a short string at floating-point coordinates, clipped to the buffer.
+fn put_float(buf: &mut Buffer, x: f32, y: f32, s: &str, style: Style) {
+    if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+        return;
+    }
+    put_str(buf, x.round() as u16, y.round() as u16, s, style);
+}
+
+// ---------------------------------------------------------------------------
+// Experimentation — free-form unit explorer
+// ---------------------------------------------------------------------------
+
+/// Deduction Duck only reacts when an experiment lands on something famous —
+/// that way kids have to *induce* a reaction by trying interesting amounts.
+enum ExpReaction {
+    /// Most experiments: he stays out of it.
+    None,
+    /// The amount is about the size of a real-world thing.
+    Match(String),
+    /// Astronomically bigger than anything on the list — hat-explode time.
+    Boom(String),
+}
+
+/// Decide the duck's reaction from the *physical* size in base units (so it's
+/// the same whichever target unit is on screen) — deterministic, so a fun
+/// discovery can be reproduced.
+fn experiment_reaction(cat: crate::units::Category, base_value: f64) -> ExpReaction {
+    let refs = crate::units::comparisons(cat);
+    if refs.is_empty() || !(base_value > 0.0) {
+        return ExpReaction::None;
+    }
+    // Closest reference by ratio (log distance).
+    let best = refs.iter().min_by(|a, b| {
+        let da = (base_value / a.base).ln().abs();
+        let db = (base_value / b.base).ln().abs();
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let largest = refs.last().unwrap();
+
+    if let Some(r) = best {
+        let ratio = base_value / r.base;
+        if (0.55..=1.8).contains(&ratio) {
+            let n = ratio.round() as i64;
+            let fact = if n <= 1 {
+                format!("That's about the same as {}!", r.one)
+            } else {
+                format!("That's about {} {}!", n, r.many)
+            };
+            return ExpReaction::Match(fact);
+        }
+    }
+    if base_value >= largest.base * 2.0 {
+        let n = base_value / largest.base;
+        return ExpReaction::Boom(format!("That's about {} {}!", crate::units::format_amount(n), largest.many));
+    }
+    ExpReaction::None
+}
+
+fn draw_experiment(f: &mut Frame, app: &App, area: Rect) {
+    use crate::units::{self, Category};
+
+    let cat = Category::ALL[app.exp_category];
+    let units_list = cat.units();
+    let from = units_list[app.exp_from.min(units_list.len() - 1)];
+    let to = units_list[app.exp_to.min(units_list.len() - 1)];
+    let amount: f64 = app.exp_amount.parse().unwrap_or(0.0);
+    let result = units::convert(amount, from, to);
+
+    let buf = f.buffer_mut();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightMagenta))
+        .title(" Experimentation — Unit Explorer ")
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    put_str(buf, inner.left() + 2, inner.top() + 1, "Type any amount — even a silly one — and watch it convert!", Style::default().fg(Color::Gray));
+
+    // Editable fields.
+    let amount_display = if app.exp_amount.is_empty() { "0".to_string() } else { app.exp_amount.clone() };
+    let caret = if app.exp_field == 0 { "_" } else { "" };
+    let rows = [
+        (0usize, "Amount".to_string(), format!("{}{}", amount_display, caret)),
+        (1, "From".to_string(), format!("< {} >", from.plural)),
+        (2, "To".to_string(), format!("< {} >", to.plural)),
+        (3, "Category".to_string(), format!("< {} >", cat.name())),
+    ];
+    let col = inner.left() + 4;
+    let mut y = inner.top() + 3;
+    for (i, label, value) in &rows {
+        let selected = *i == app.exp_field;
+        let style = if selected {
+            Style::default().fg(Color::Black).bg(Color::LightMagenta).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        put_str(buf, col, y, format!("{:<10}{}", label, value), style);
+        y += 2;
+    }
+
+    // The result, shown large and friendly.
+    let line = format!("= {} {}", units::format_amount(result), to.plural);
+    put_str(buf, center(inner, line.chars().count() as u16), inner.top() + 10, &line, Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
+    let recap = format!("{} {} is...", units::format_amount(amount), from.plural);
+    put_str(buf, center(inner, recap.chars().count() as u16), inner.top() + 9, &recap, Style::default().fg(Color::Gray));
+
+    // Deduction Duck only pops up (centre stage) for an interesting result —
+    // the physical size, so the same landmark shows whichever unit is chosen.
+    let base_value = amount * from.to_base;
+    draw_exp_reaction(buf, inner, experiment_reaction(cat, base_value), app.anim_frame);
+
+    put_str(buf, inner.left() + 2, inner.bottom().saturating_sub(1), "Up/Down field   Left/Right change   type digits   Esc menu", Style::default().fg(Color::DarkGray));
+}
+
+/// Draw Deduction Duck's reaction, centred near the bottom of the explorer.
+fn draw_exp_reaction(buf: &mut Buffer, inner: Rect, reaction: ExpReaction, frame: u64) {
+    let (fact, boom) = match reaction {
+        ExpReaction::None => return, // he stays quiet — keep experimenting!
+        ExpReaction::Match(fact) => (fact, false),
+        ExpReaction::Boom(fact) => (fact, true),
+    };
+
+    // Centre stage, lower middle.  The duck stays put; its life comes from the
+    // waddle frame so the fixed text above it never gets overrun.
+    let duck_x = center(inner, duck::WIDTH);
+    let duck_y = inner.bottom().saturating_sub(duck::HEIGHT + 1);
+
+    // Boom needs an extra line above for the bigger headline.
+    let head_row = duck_y.saturating_sub(if boom { 3 } else { 2 });
+    let fact_row = duck_y.saturating_sub(if boom { 2 } else { 1 });
+
+    let headline = if boom { "BOOM!" } else { "Whoa!" };
+    let head_color = if boom { Color::LightRed } else { Color::LightYellow };
+    put_str(buf, center(inner, headline.chars().count() as u16), head_row, headline, Style::default().fg(head_color).add_modifier(Modifier::BOLD));
+    put_str(buf, center(inner, fact.chars().count() as u16), fact_row, &fact, Style::default().fg(head_color));
+
+    duck::draw_pose(buf, duck_x, duck_y, Pose::Stand, frame / 5, Style::default().fg(DUCK_COLOR));
+
+    if boom {
+        // Blow the mortarboard off in a small ring around the head (kept clear
+        // of the fact line two rows above).
+        for dx in 1..8u16 {
+            put_str(buf, duck_x + dx, duck_y, " ", Style::default());
+            put_str(buf, duck_x + dx, duck_y + 1, " ", Style::default());
+        }
+        let cx = duck_x as f32 + 4.0;
+        let cy = duck_y as f32;
+        let r = 1.0 + (frame % 12) as f32 * 0.2;
+        let pieces = ['*', '✦', '!', '+', '#', '°'];
+        for (k, ch) in pieces.iter().enumerate() {
+            let ang = k as f32 * std::f32::consts::TAU / pieces.len() as f32;
+            put_float(buf, cx + ang.cos() * r, cy + ang.sin() * r * 0.4, &ch.to_string(), Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD));
+        }
+    } else if (frame / 5) % 2 == 0 {
+        // A couple of sparkles of delight flanking the duck.
+        put_str(buf, duck_x.saturating_sub(2), duck_y + 1, "✦", Style::default().fg(Color::LightYellow));
+        put_str(buf, duck_x + duck::WIDTH + 1, duck_y + 1, "✦", Style::default().fg(Color::LightYellow));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,26 +435,95 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
         draw_menu_row(buf, col, y, sel == 2 + i, &format!("{} {}", mark, op.name()), "(Enter toggles)");
         y += 1;
     }
-    y += 1;
-
-    draw_menu_row(buf, col, y, sel == 6, &format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 7, "Settings (number ranges)...", "(Enter to open)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 8, "My Progress...", "(Enter to view)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 9, "Teacher Area...", "(password)");
+    let units_mark = if app.menu_units { "[x]" } else { "[ ]" };
+    draw_menu_row(buf, col, y, sel == 6, &format!("{} Units of Measure", units_mark), "(measuring problems)");
     y += 2;
 
-    draw_menu_row(buf, col, y, sel == 10, "▶  Start Practice", "(no timer)");
+    draw_menu_row(buf, col, y, sel == 7, &format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)");
     y += 1;
-    draw_menu_row(buf, col, y, sel == 11, "▶  Start Challenge", "(60-second timer)");
+    draw_menu_row(buf, col, y, sel == 8, "Settings (number ranges)...", "(Enter to open)");
+    y += 1;
+    draw_menu_row(buf, col, y, sel == 9, "My Progress...", "(Enter to view)");
+    y += 1;
+    draw_menu_row(buf, col, y, sel == 10, "Teacher Area...", "(password)");
+    y += 2;
+
+    draw_menu_row(buf, col, y, sel == 11, "▶  Start Practice", "(no timer)");
+    y += 1;
+    draw_menu_row(buf, col, y, sel == 12, "▶  Start Challenge", "(60-second timer)");
+    y += 1;
+    draw_menu_row(buf, col, y, sel == 13, "▶  Experimentation", "(explore unit conversions)");
 
     put_str(buf, col, area.bottom().saturating_sub(2), "Up / Down to move    N: add student    Q: quit", Style::default().fg(Color::DarkGray));
+
+    // Deduction Duck wanders by every so often.
+    draw_menu_duck(buf, area, app.anim_frame);
 
     // New-student name entry.
     if app.naming {
         draw_name_prompt(buf, area, &app.name_input);
+    }
+}
+
+/// Every so often Deduction Duck wanders by the menu: peeking in from a side
+/// (clear of the centred text) or, when there's room below the menu, waddling
+/// right across the bottom.  Driven entirely by the free-running clock.
+fn draw_menu_duck(buf: &mut Buffer, area: Rect, frame: u64) {
+    let style = Style::default().fg(DUCK_COLOR);
+    let hgt = duck::HEIGHT as i32;
+
+    // One appearance per long cycle; off-stage the rest of the time.
+    const CYCLE: u64 = 640;
+    let phase = frame % CYCLE;
+    let y_at = |frac: f32| area.top() as i32 + (area.height as f32 * frac) as i32 - hgt / 2;
+
+    match (frame / CYCLE) % 4 {
+        // A full waddle across the bottom — only where the menu leaves space.
+        0 if (area.bottom() as i32 - hgt) > area.top() as i32 + 27 => {
+            const DUR: u64 = 200;
+            if phase < DUR {
+                let t = phase as f32 / DUR as f32;
+                let span = (area.width as i32 + 2 * duck::WIDTH as i32 + 4) as f32;
+                let x = (area.left() as i32 - duck::WIDTH as i32 - 2) as f32 + t * span;
+                let y = area.bottom() as i32 - hgt - if (frame / 6) % 2 == 0 { 0 } else { 1 };
+                duck::draw_pose_i32(buf, x.round() as i32, y, Pose::WalkRight, frame / 5, style);
+            }
+        }
+        // Peek in from the right at a low spot.
+        0 | 2 => peek_in(buf, area, phase, frame, true, y_at(0.62), style),
+        // Peek in from the right, higher up.
+        1 => peek_in(buf, area, phase, frame, true, y_at(0.32), style),
+        // Peek in from the left.
+        _ => peek_in(buf, area, phase, frame, false, y_at(0.5), style),
+    }
+}
+
+/// Slide the duck in from a side edge, hold with a little "hi!", then back out.
+fn peek_in(buf: &mut Buffer, area: Rect, phase: u64, frame: u64, from_right: bool, y: i32, style: Style) {
+    use std::f32::consts::PI;
+    const DUR: u64 = 150;
+    if phase >= DUR {
+        return;
+    }
+    let w = duck::WIDTH as i32;
+    let t = phase as f32 / DUR as f32;
+    let depth = ((t * PI).sin() * (w as f32 + 2.0)).round() as i32;
+    let saying = (0.4..0.62).contains(&t);
+    let hi = Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD);
+
+    let x = if from_right {
+        area.right() as i32 - depth
+    } else {
+        area.left() as i32 - w + depth
+    };
+    let pose = if from_right { Pose::Stand } else { Pose::WalkRight };
+    duck::draw_pose_i32(buf, x, y, pose, frame / 8, style);
+
+    // A little "hi!" just above his head, where it can't collide with the
+    // centred menu text.
+    if saying && y > area.top() as i32 {
+        let hx = (x + 2).clamp(area.left() as i32, area.right() as i32 - 4);
+        put_str(buf, hx as u16, (y - 1) as u16, "hi!", hi);
     }
 }
 
@@ -316,6 +672,15 @@ fn draw_teacher_manage(f: &mut Frame, app: &App, area: Rect) {
     put_str(buf, col, area.top() + 1, " Why? Examples ", a_style);
     put_str(buf, col + 16, area.top() + 1, " Student Records ", r_style);
     put_str(buf, col + 36, area.top() + 1, "Tab: switch", Style::default().fg(Color::DarkGray));
+
+    // Measurement locality lives here now (used by Units of Measure problems).
+    put_str(
+        buf,
+        col,
+        area.bottom().saturating_sub(4),
+        format!("Units locality: {}    (L: change)", app.config.locality.name()),
+        Style::default().fg(Color::LightCyan),
+    );
 
     match app.teacher_view {
         TeacherView::Anecdotes => draw_teacher_anecdotes(buf, app, area, col),
@@ -501,24 +866,117 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
         draw_challenge_hud(f, app, hud);
     }
 
-    // Card: either an in-flight transition or the current problem.
+    // Card: either an in-flight transition or the current problem (arithmetic
+    // or, when Units of Measure is checked, a measurement problem).
     if let Some(t) = &app.transition {
         t.render(card_area, f.buffer_mut());
     } else if app.challenge.as_ref().map_or(false, |c| c.finished) {
         draw_challenge_summary(f, app, card_area);
+    } else if app.current_is_unit {
+        let banner = match app.feedback {
+            Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+            Feedback::Wrong => Some(("✗  Not quite — try again!".to_string(), Color::LightRed)),
+            Feedback::None => None,
+        };
+        let p = &app.unit_problem;
+        render_unit_card(card_area, f.buffer_mut(), p, &app.input, banner);
+        if p.duck_jump {
+            let inner = Block::default().borders(Borders::ALL).inner(card_area);
+            draw_duck_gag(f.buffer_mut(), inner, p.theme, app.anim_frame);
+        }
     } else {
         let banner = feedback_banner(app);
         render_card(card_area, f.buffer_mut(), &app.current, &app.input, app.config.layout, banner);
     }
 
-    // Deduction Duck rides on top of everything when summoned.
-    if app.help_in > 0.0 && app.transition.is_none() {
-        draw_help_overlay(f, app, card_area);
+    // Deduction Duck helps with either kind of problem; the Why panel is
+    // arithmetic-only.
+    if app.transition.is_none() {
+        if app.current_is_unit {
+            if app.help_in > 0.0 {
+                draw_unit_help(f, app, card_area);
+            }
+        } else {
+            if app.help_in > 0.0 {
+                draw_help_overlay(f, app, card_area);
+            }
+            if app.why_active {
+                draw_why_overlay(f, app, card_area);
+            }
+        }
     }
-    // "Why am I learning this?" sits above even the duck.
-    if app.why_active && app.transition.is_none() {
-        draw_why_overlay(f, app, card_area);
+}
+
+/// Deduction Duck's hint panel for a measurement / money problem: a how-to
+/// hint (never the answer), with R to reveal the worked answer.
+fn draw_unit_help(f: &mut Frame, app: &App, area: Rect) {
+    let p = &app.unit_problem;
+
+    // Tagged lines: 0 plain, 1 answer, 2 encouragement, 3 header.
+    let mut lines: Vec<(String, u8)> = Vec::new();
+    if let Some(msg) = &app.encourage {
+        lines.push((msg.clone(), 2));
+        lines.push((String::new(), 0));
     }
+    lines.push(("Deduction Duck's hint:".to_string(), 3));
+    for h in &p.hint {
+        lines.push((format!("• {}", h), 0));
+    }
+    if app.revealed {
+        lines.push((String::new(), 0));
+        lines.push((format!("Answer: {} {}", p.answer, p.unit_label), 1));
+    }
+
+    let content_w = lines.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(20) as u16;
+    let panel_w = (content_w + 6 + duck::WIDTH).min(area.width.saturating_sub(2)).max(20);
+    let panel_h = ((lines.len() as u16).max(duck::HEIGHT) + 3).min(area.height.saturating_sub(2)).max(6);
+    let rest_y = area.top() + area.height.saturating_sub(panel_h) / 2;
+    let slide = ((1.0 - app.help_in.clamp(0.0, 1.0)) * (panel_h as f32 + 2.0)) as u16;
+    let panel_x = area.left() + area.width.saturating_sub(panel_w) / 2;
+    let panel_y = (rest_y + slide).min(area.bottom().saturating_sub(1));
+    let panel = Rect {
+        x: panel_x,
+        y: panel_y,
+        width: panel_w.min(area.right().saturating_sub(panel_x)),
+        height: panel_h.min(area.bottom().saturating_sub(panel_y)),
+    };
+    if panel.width < 12 || panel.height < 4 {
+        return;
+    }
+
+    let buf = f.buffer_mut();
+    Clear.render(panel, buf);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightYellow))
+        .title(" Deduction Duck ")
+        .style(Style::default().bg(STAGE_BG));
+    let inner = block.inner(panel);
+    block.render(panel, buf);
+
+    let duck_x = inner.right().saturating_sub(duck::WIDTH);
+    let duck_y = inner.top() + inner.height.saturating_sub(duck::HEIGHT) / 2;
+    duck::draw_pose(buf, duck_x, duck_y, Pose::Stand, app.anim_frame / 6, Style::default().fg(DUCK_COLOR));
+
+    let text_w = duck_x.saturating_sub(inner.left() + 1);
+    let mut y = inner.top();
+    for (line, tag) in &lines {
+        if y >= inner.bottom().saturating_sub(1) {
+            break;
+        }
+        let style = match tag {
+            1 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            2 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            3 => Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
+            _ => Style::default().fg(Color::White),
+        };
+        put_str(buf, inner.left(), y, clip(line, text_w), style);
+        y += 1;
+    }
+
+    let footer = if app.revealed { "R: hide answer    H: shoo" } else { "R: show answer    H: shoo" };
+    put_str(buf, inner.left(), inner.bottom().saturating_sub(1), footer, Style::default().fg(Color::Gray));
 }
 
 /// The Y overlay: a panel listing real-world uses of the current operation.

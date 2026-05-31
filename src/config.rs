@@ -110,6 +110,9 @@ pub struct Config {
     /// Teacher password gate (set on first visit to the Teacher Area).
     #[serde(default)]
     pub teacher: Option<TeacherAuth>,
+    /// Measurement locality for the Units of Measure section.
+    #[serde(default)]
+    pub locality: crate::units::Locality,
 }
 
 impl Default for Config {
@@ -128,7 +131,13 @@ impl Default for Config {
             GradeRange { add_max: 2000, mul_max: 25, div_max: 20, allow_negative: true }, // 7
             GradeRange { add_max: 5000, mul_max: 30, div_max: 25, allow_negative: true }, // 8
         ];
-        Config { grades, layout: Layout::Horizontal, graphics: GraphicsMode::Low, teacher: None }
+        Config {
+            grades,
+            layout: Layout::Horizontal,
+            graphics: GraphicsMode::Low,
+            teacher: None,
+            locality: crate::units::Locality::UnitedStates,
+        }
     }
 }
 

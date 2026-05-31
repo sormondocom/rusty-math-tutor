@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rand::rngs::ThreadRng;
+use rand::Rng;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -20,7 +21,9 @@ const CHALLENGE_LEN: Duration = Duration::from_secs(60);
 /// Maximum digits a student can type for an answer.
 const MAX_INPUT: usize = 7;
 /// Number of selectable rows on the menu.
-const MENU_ITEMS: usize = 12;
+const MENU_ITEMS: usize = 14;
+/// Editable fields on the Experimentation explorer.
+const EXP_FIELDS: usize = 4;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
@@ -32,6 +35,7 @@ pub enum Screen {
     Cinematic,
     Practice,
     Challenge,
+    Experiment,
 }
 
 /// How long each milestone-cinematic scene lingers before transitioning.
@@ -55,12 +59,14 @@ pub struct Cinematic {
 const MI_STUDENT: usize = 0;
 const MI_GRADE: usize = 1;
 const MI_OPS: std::ops::RangeInclusive<usize> = 2..=5;
-const MI_LAYOUT: usize = 6;
-const MI_SETTINGS: usize = 7;
-const MI_PROGRESS: usize = 8;
-const MI_TEACHER: usize = 9;
-const MI_PRACTICE: usize = 10;
-const MI_CHALLENGE: usize = 11;
+const MI_UNITS: usize = 6;
+const MI_LAYOUT: usize = 7;
+const MI_SETTINGS: usize = 8;
+const MI_PROGRESS: usize = 9;
+const MI_TEACHER: usize = 10;
+const MI_PRACTICE: usize = 11;
+const MI_CHALLENGE: usize = 12;
+const MI_EXPERIMENT: usize = 13;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Feedback {
@@ -133,6 +139,8 @@ pub struct App {
     // Menu selections.
     pub menu_grade: u8,
     pub menu_ops: [bool; 4],
+    /// Whether measurement problems are mixed into the session.
+    pub menu_units: bool,
     pub menu_index: usize,
 
     // Startup graphics-mode picker.
@@ -148,6 +156,21 @@ pub struct App {
     pub current: Problem,
     pub input: String,
     pub feedback: Feedback,
+
+    // Units of Measure can be mixed into a session.  `current_is_unit` says
+    // which kind the active problem is; the matching field below holds it.
+    units_enabled: bool,
+    pub current_is_unit: bool,
+    pending_is_unit: bool,
+    pub unit_problem: crate::units::UnitProblem,
+    unit_pending: Option<crate::units::UnitProblem>,
+
+    // Experimentation — free-form unit explorer.
+    pub exp_category: usize,
+    pub exp_amount: String,
+    pub exp_from: usize,
+    pub exp_to: usize,
+    pub exp_field: usize,
 
     // Transition between the answered card and the next one.
     pub transition: Option<Transition>,
@@ -215,6 +238,7 @@ impl App {
     pub fn new(config: Config) -> Self {
         let mut rng = rand::thread_rng();
         let current = problem::generate(config.range(1), &[Op::Add], &mut rng);
+        let unit_problem = crate::units::generate(config.locality, &mut rng);
         let startup_index = if config.graphics == crate::config::GraphicsMode::Cpu { 1 } else { 0 };
         App {
             screen: Screen::Startup,
@@ -226,6 +250,7 @@ impl App {
             streak: 0,
             menu_grade: 1,
             menu_ops: [true, true, false, false],
+            menu_units: false,
             menu_index: 0,
             startup_index,
             settings_grade: 1,
@@ -233,6 +258,17 @@ impl App {
             grade: 1,
             ops: vec![Op::Add],
             current,
+            units_enabled: false,
+            current_is_unit: false,
+            pending_is_unit: false,
+            unit_problem,
+            unit_pending: None,
+            // Defaults primed for a fun "8000 gallons -> teaspoons" experiment.
+            exp_category: 0,
+            exp_amount: "8000".to_string(),
+            exp_from: 6,
+            exp_to: 0,
+            exp_field: 0,
             input: String::new(),
             feedback: Feedback::None,
             transition: None,
@@ -288,9 +324,7 @@ impl App {
         if let Some(t) = &mut self.transition {
             if t.advance() {
                 self.transition = None;
-                if let Some(next) = self.pending.take() {
-                    self.current = next;
-                }
+                self.commit_pending();
                 self.input.clear();
                 self.feedback = Feedback::None;
                 self.strategy_index = 0;
@@ -356,9 +390,7 @@ impl App {
             ch.extend(c.started.elapsed());
         }
         self.screen = self.cinematic_return;
-        if let Some(next) = self.pending.take() {
-            self.current = next;
-        }
+        self.commit_pending();
         self.input.clear();
         self.feedback = Feedback::None;
         self.strategy_index = 0;
@@ -392,6 +424,7 @@ impl App {
                 }
             }
             Screen::Practice | Screen::Challenge => self.on_session_key(key),
+            Screen::Experiment => self.on_experiment_key(key),
         }
     }
 
@@ -448,8 +481,10 @@ impl App {
                     self.naming = true;
                     self.name_input.clear();
                 }
+                MI_UNITS => self.menu_units = !self.menu_units,
                 MI_PRACTICE => self.start_session(false),
                 MI_CHALLENGE => self.start_session(true),
+                MI_EXPERIMENT => self.screen = Screen::Experiment,
                 _ => {}
             },
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.should_quit = true,
@@ -591,6 +626,12 @@ impl App {
             self.teacher_msg = None;
             return;
         }
+        // L cycles the measurement locality (used by Units of Measure).
+        if matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')) {
+            self.cycle_locality(true);
+            self.teacher_msg = Some(format!("Units locality: {}", self.config.locality.name()));
+            return;
+        }
         match self.teacher_view {
             TeacherView::Anecdotes => match key.code {
                 KeyCode::Left => self.teacher_op = (self.teacher_op + Op::ALL.len() - 1) % Op::ALL.len(),
@@ -693,28 +734,8 @@ impl App {
             return;
         }
 
-        // Y answers "Why am I learning this?" with real-world uses.
-        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-            self.why_active = !self.why_active;
-            if self.why_active {
-                self.help_active = false;
-                self.refresh_why_items();
-            }
-            return;
-        }
-
-        // While the Why panel is open, Up/Down scroll long lists.
-        if self.why_active && matches!(key.code, KeyCode::Up | KeyCode::Down) {
-            if key.code == KeyCode::Up {
-                self.why_scroll = self.why_scroll.saturating_sub(1);
-            } else {
-                self.why_scroll = (self.why_scroll + 1).min(self.why_max_scroll.get());
-            }
-            return;
-        }
-
-        // Help toggle works any time; opening always starts at the first method
-        // with the answer hidden (hint-first).
+        // The help duck (H) and answer reveal (R) work for every problem —
+        // arithmetic shows strategies, measurement shows a how-to hint.
         if matches!(key.code, KeyCode::Char('h') | KeyCode::Char('H')) {
             self.help_active = !self.help_active;
             if self.help_active {
@@ -724,27 +745,45 @@ impl App {
             }
             return;
         }
-
-        // While the duck is out, Space cycles strategy, R reveals the answer.
-        if self.help_active {
-            match key.code {
-                KeyCode::Char(' ') => {
-                    self.strategy_index = self.strategy_index.wrapping_add(1);
-                    self.revealed = false;
-                    return;
-                }
-                KeyCode::Char('r') | KeyCode::Char('R') => {
-                    self.revealed = !self.revealed;
-                    return;
-                }
-                _ => {}
-            }
+        if self.help_active && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')) {
+            self.revealed = !self.revealed;
+            return;
         }
 
-        // V switches the problem layout live.
-        if matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
-            self.config.layout = self.config.layout.toggled();
-            return;
+        // The Why panel, strategy cycling, and layout toggle are arithmetic-only.
+        if !self.current_is_unit {
+            // Y answers "Why am I learning this?" with real-world uses.
+            if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+                self.why_active = !self.why_active;
+                if self.why_active {
+                    self.help_active = false;
+                    self.refresh_why_items();
+                }
+                return;
+            }
+
+            // While the Why panel is open, Up/Down scroll long lists.
+            if self.why_active && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+                if key.code == KeyCode::Up {
+                    self.why_scroll = self.why_scroll.saturating_sub(1);
+                } else {
+                    self.why_scroll = (self.why_scroll + 1).min(self.why_max_scroll.get());
+                }
+                return;
+            }
+
+            // While the duck is out, Space cycles to another strategy.
+            if self.help_active && key.code == KeyCode::Char(' ') {
+                self.strategy_index = self.strategy_index.wrapping_add(1);
+                self.revealed = false;
+                return;
+            }
+
+            // V switches the problem layout live.
+            if matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+                self.config.layout = self.config.layout.toggled();
+                return;
+            }
         }
 
         // Finished challenge: Enter starts a fresh run.
@@ -797,15 +836,17 @@ impl App {
     fn start_session(&mut self, challenge: bool) {
         self.grade = self.menu_grade;
         self.ops = Op::ALL.iter().copied().enumerate().filter(|(i, _)| self.menu_ops[*i]).map(|(_, op)| op).collect();
-        if self.ops.is_empty() {
+        self.units_enabled = self.menu_units;
+        // Need at least one problem type — fall back to addition.
+        if self.ops.is_empty() && !self.units_enabled {
             self.ops.push(Op::Add);
         }
         self.screen = if challenge { Screen::Challenge } else { Screen::Practice };
-        self.current = problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng);
         self.input.clear();
         self.feedback = Feedback::None;
         self.transition = None;
         self.pending = None;
+        self.unit_pending = None;
         self.help_active = false;
         self.help_in = 0.0;
         self.strategy_index = 0;
@@ -816,6 +857,9 @@ impl App {
         self.encourage = None;
         self.cinematic = None;
         self.challenge = if challenge { Some(Challenge::new(CHALLENGE_LEN)) } else { None };
+        // Pick the first problem (arithmetic or measurement).
+        self.generate_pending();
+        self.commit_pending();
     }
 
     fn to_menu(&mut self) {
@@ -831,36 +875,38 @@ impl App {
     }
 
     fn check_answer(&mut self) {
-        let parsed = self.input.parse::<i64>().ok();
-        if parsed == Some(self.current.answer) {
+        let answer = if self.current_is_unit { self.unit_problem.answer } else { self.current.answer };
+        if self.input.parse::<i64>().ok() == Some(answer) {
             self.feedback = Feedback::Correct;
             if let Some(c) = &mut self.challenge {
                 c.solved += 1;
             }
-            // Credit the current student and track their personal-best streak.
-            let op = self.current.op;
             self.streak += 1;
             let streak = self.streak;
-            let student = self.roster.current_mut();
-            student.record(op);
-            student.note_streak(streak);
-            let total = student.total();
-
+            self.roster.current_mut().note_streak(streak);
             self.wrong_streak = 0;
             self.encourage = None;
             self.help_active = false;
 
-            let next = problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng);
-            if crate::cinematic::is_milestone(total) {
-                self.start_cinematic(total, next);
-            } else {
-                self.begin_transition(next);
+            // Only arithmetic counts toward the per-operation stats and the
+            // milestone celebrations.
+            if !self.current_is_unit {
+                let op = self.current.op;
+                let student = self.roster.current_mut();
+                student.record(op);
+                let total = student.total();
+                if crate::cinematic::is_milestone(total) {
+                    self.generate_pending();
+                    self.start_cinematic(total);
+                    return;
+                }
             }
+            self.begin_transition();
         } else {
             self.feedback = Feedback::Wrong;
             self.streak = 0;
+            // After a few tries the duck steps in (with a hint for either kind).
             self.wrong_streak += 1;
-            // After a few tries, Deduction Duck steps in with a kind word.
             if self.wrong_streak >= STRUGGLE_THRESHOLD {
                 self.encourage = Some(crate::cinematic::struggle_message(&mut self.rng));
                 self.help_active = true;
@@ -872,19 +918,131 @@ impl App {
 
     /// Capture the (correct) current card and the next card, then kick off a
     /// random transition between them.
-    fn begin_transition(&mut self, next: Problem) {
+    fn begin_transition(&mut self) {
+        self.generate_pending();
         let area = ui::card_area(self.screen, self.area);
-        let from = self.capture(area, &self.current, &self.input, Some(("✓  Correct!".to_string(), ratatui::style::Color::LightGreen)));
-        let to = self.capture(area, &next, "", None);
-        self.pending = Some(next);
+        let from = self.capture_current(area, Some(("✓  Correct!".to_string(), ratatui::style::Color::LightGreen)));
+        let to = self.capture_pending(area);
         self.transition = Some(Transition::new(from, to, &mut self.rng));
     }
 
-    /// Kick off a milestone celebration, holding `next` to resume afterwards.
-    fn start_cinematic(&mut self, total: u32, next: Problem) {
+    // -- Units of Measure (mixed into sessions) -----------------------------
+
+    fn cycle_locality(&mut self, forward: bool) {
+        let all = crate::units::Locality::ALL;
+        let i = all.iter().position(|&l| l == self.config.locality).unwrap_or(0);
+        let n = all.len();
+        let next = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        self.config.locality = all[next];
+        self.config.save();
+    }
+
+    /// Generate the next problem, randomly choosing between an arithmetic
+    /// problem and a measurement problem from the enabled mix.
+    fn generate_pending(&mut self) {
+        let n_ops = self.ops.len();
+        let total = n_ops + self.units_enabled as usize;
+        let pick_units = total > 0 && self.units_enabled && self.rng.gen_range(0..total) >= n_ops;
+        if pick_units {
+            self.unit_pending = Some(crate::units::generate(self.config.locality, &mut self.rng));
+            self.pending_is_unit = true;
+        } else {
+            self.pending = Some(problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng));
+            self.pending_is_unit = false;
+        }
+    }
+
+    /// Promote the pending problem to the current one (after a transition or
+    /// cinematic), of whichever kind it is.
+    fn commit_pending(&mut self) {
+        self.current_is_unit = self.pending_is_unit;
+        if self.pending_is_unit {
+            if let Some(u) = self.unit_pending.take() {
+                self.unit_problem = u;
+            }
+        } else if let Some(p) = self.pending.take() {
+            self.current = p;
+        }
+    }
+
+    fn capture_current(&self, area: Rect, banner: Option<(String, ratatui::style::Color)>) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        if self.current_is_unit {
+            ui::render_unit_card(area, &mut buf, &self.unit_problem, &self.input, banner);
+        } else {
+            ui::render_card(area, &mut buf, &self.current, &self.input, self.config.layout, banner);
+        }
+        buf
+    }
+
+    fn capture_pending(&self, area: Rect) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        if self.pending_is_unit {
+            if let Some(u) = &self.unit_pending {
+                ui::render_unit_card(area, &mut buf, u, "", None);
+            }
+        } else if let Some(p) = &self.pending {
+            ui::render_card(area, &mut buf, p, "", self.config.layout, None);
+        }
+        buf
+    }
+
+    // -- Experimentation (free-form unit explorer) --------------------------
+
+    fn exp_unit_count(&self) -> usize {
+        crate::units::Category::ALL[self.exp_category].units().len()
+    }
+
+    fn on_experiment_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.to_menu(),
+            KeyCode::Up => self.exp_field = (self.exp_field + EXP_FIELDS - 1) % EXP_FIELDS,
+            KeyCode::Down => self.exp_field = (self.exp_field + 1) % EXP_FIELDS,
+            KeyCode::Left | KeyCode::Right => {
+                let fwd = key.code == KeyCode::Right;
+                self.adjust_experiment(fwd);
+            }
+            // Digits and a single decimal point edit the amount from any field.
+            KeyCode::Char(c @ '0'..='9') => {
+                if self.exp_amount.chars().count() < 12 {
+                    self.exp_amount.push(c);
+                }
+            }
+            KeyCode::Char('.') => {
+                if !self.exp_amount.contains('.') && self.exp_amount.chars().count() < 12 {
+                    self.exp_amount.push('.');
+                }
+            }
+            KeyCode::Backspace => {
+                self.exp_amount.pop();
+            }
+            _ => {}
+        }
+    }
+
+    fn adjust_experiment(&mut self, fwd: bool) {
+        let step = |i: usize, n: usize| if fwd { (i + 1) % n } else { (i + n - 1) % n };
+        match self.exp_field {
+            // 0 = amount (no left/right effect)
+            1 => self.exp_from = step(self.exp_from, self.exp_unit_count()),
+            2 => self.exp_to = step(self.exp_to, self.exp_unit_count()),
+            3 => {
+                let n = crate::units::Category::ALL.len();
+                self.exp_category = step(self.exp_category, n);
+                // Keep unit choices valid for the new category.
+                let count = self.exp_unit_count();
+                self.exp_from = self.exp_from.min(count - 1);
+                self.exp_to = self.exp_to.min(count - 1);
+            }
+            _ => {}
+        }
+    }
+
+    /// Kick off a milestone celebration; the already-generated pending problem
+    /// resumes the lesson afterwards.
+    fn start_cinematic(&mut self, total: u32) {
         let name = self.roster.current().name.clone();
         let scenes = crate::cinematic::scenes(&name, total, &mut self.rng);
-        self.pending = Some(next);
         self.cinematic_return = self.screen;
         self.cinematic = Some(Cinematic {
             scenes,
@@ -894,12 +1052,6 @@ impl App {
             started: Instant::now(),
         });
         self.screen = Screen::Cinematic;
-    }
-
-    fn capture(&self, area: Rect, p: &Problem, input: &str, banner: Option<(String, ratatui::style::Color)>) -> Buffer {
-        let mut buf = Buffer::empty(area);
-        ui::render_card(area, &mut buf, p, input, self.config.layout, banner);
-        buf
     }
 }
 
@@ -1012,6 +1164,28 @@ mod tests {
                 c.finished = true;
             }
             term.draw(|f| ui::draw(f, &app)).unwrap();
+
+            // Units-only session (the Units checkbox on, no ops), sweeping the
+            // duck-gag animation phases.
+            app.menu_ops = [false, false, false, false];
+            app.menu_units = true;
+            app.start_session(false);
+            app.set_area(Rect::new(0, 0, w, h));
+            assert!(app.current_is_unit, "units-only session should show a unit problem");
+            app.input = "8".to_string();
+            for frame in [5u64, 45, 60, 90] {
+                app.anim_frame = frame;
+                term.draw(|f| ui::draw(f, &app)).unwrap();
+            }
+            app.menu_units = false;
+
+            // Experimentation explorer: calm, scratch, and boom reactions.
+            app.screen = Screen::Experiment;
+            for amount in ["3", "300", "8000"] {
+                app.exp_amount = amount.to_string();
+                app.anim_frame = app.anim_frame.wrapping_add(7);
+                term.draw(|f| ui::draw(f, &app)).unwrap();
+            }
         }
     }
 
@@ -1094,6 +1268,181 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(80, 13)).unwrap();
         term.draw(|f| ui::draw(f, &app)).unwrap();
         assert!(app.why_max_scroll.get() > 0, "short panel should scroll");
+    }
+
+    #[test]
+    fn menu_duck_renders_across_cycle_without_panic() {
+        // Sweep the whole appearance cycle (walk + both peeks) at a few sizes.
+        for (w, h) in [(64u16, 40u16), (64, 24), (40, 12)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            let mut app = App::new(Config::default());
+            app.screen = Screen::Menu;
+            for frame in (0u64..2600).step_by(13) {
+                app.anim_frame = frame;
+                term.draw(|f| ui::draw(f, &app)).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn every_unit_problem_has_a_help_hint() {
+        use crate::units::Locality;
+        let mut rng = rand::thread_rng();
+        for loc in Locality::ALL {
+            for _ in 0..400 {
+                let p = crate::units::generate(loc, &mut rng);
+                assert!(!p.hint.is_empty(), "no hint for: {}", p.question);
+                assert!(p.hint.iter().all(|h| !h.trim().is_empty()));
+            }
+        }
+    }
+
+    #[test]
+    fn unit_problem_help_renders() {
+        let mut app = App::new(Config::default());
+        app.menu_ops = [false, false, false, false];
+        app.menu_units = true;
+        app.start_session(false);
+        app.set_area(Rect::new(0, 0, 80, 24));
+        assert!(app.current_is_unit);
+        // Pressing H opens the duck; R reveals the answer.
+        use crossterm::event::{KeyCode, KeyEvent};
+        app.on_key(KeyEvent::from(KeyCode::Char('h')));
+        assert!(app.help_active, "H should summon the duck on a unit problem");
+        app.on_key(KeyEvent::from(KeyCode::Char('r')));
+        assert!(app.revealed);
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for _ in 0..6 {
+            app.on_tick();
+            term.draw(|f| ui::draw(f, &app)).unwrap();
+        }
+    }
+
+    #[test]
+    fn currency_matches_locality() {
+        use crate::units::{generate, Locality, Theme};
+        let mut rng = rand::thread_rng();
+        for loc in Locality::ALL {
+            let cur = loc.currency();
+            let mut saw_money = false;
+            for _ in 0..1000 {
+                let p = generate(loc, &mut rng);
+                if p.theme == Theme::Coin {
+                    saw_money = true;
+                    assert!(p.answer >= 0, "negative money answer for {}", loc.name());
+                    assert!(!p.unit_label.trim().is_empty());
+                    // Each prompt names this locality's money — its symbol or
+                    // (for amounts shown in minor units) the minor-unit name.
+                    let by_minor = !cur.minor_many.is_empty() && p.question.contains(cur.minor_many);
+                    assert!(p.question.contains(cur.symbol) || by_minor, "{:?} money not identifiable in: {}", loc.name(), p.question);
+                }
+            }
+            assert!(saw_money, "no money problems appeared for {}", loc.name());
+        }
+        // The yen has no subunit, so its prompts never mention cents/fen.
+        for _ in 0..1000 {
+            let p = generate(Locality::Japan, &mut rng);
+            assert!(!p.question.contains("cents") && !p.question.contains("fen"));
+        }
+    }
+
+    #[test]
+    fn explorer_converts_and_handles_outrageous_values() {
+        use crate::units::{convert, format_amount, Category};
+        let vol = Category::Volume.units();
+        let gallons = vol[6];
+        let teaspoons = vol[0];
+        assert_eq!(gallons.plural, "gallons");
+        assert_eq!(teaspoons.plural, "teaspoons");
+        // 8000 gallons is exactly 6,144,000 teaspoons.
+        let r = convert(8000.0, gallons, teaspoons);
+        assert_eq!(format_amount(r), "6,144,000");
+        // Outrageous values don't blow up the formatter.
+        let huge = convert(1e12, gallons, teaspoons);
+        assert!(format_amount(huge).contains('e') || format_amount(huge).contains(','));
+        assert_eq!(format_amount(0.0), "0");
+    }
+
+    #[test]
+    fn experiment_keys_drive_the_explorer() {
+        use crossterm::event::{KeyCode, KeyEvent};
+        let mut app = App::new(Config::default());
+        app.screen = Screen::Experiment;
+        // Cycle to the Category field and switch category; indices stay valid.
+        app.exp_field = 3;
+        app.on_key(KeyEvent::from(KeyCode::Right));
+        let count = crate::units::Category::ALL[app.exp_category].units().len();
+        assert!(app.exp_from < count && app.exp_to < count);
+        // Typing edits the amount from any field.
+        app.exp_amount.clear();
+        for c in ['4', '2', '.', '5'] {
+            app.on_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        assert_eq!(app.exp_amount, "42.5");
+    }
+
+    #[test]
+    fn unit_problems_are_well_formed_for_every_locality() {
+        use crate::units::Locality;
+        let mut rng = rand::thread_rng();
+        for loc in Locality::ALL {
+            for _ in 0..500 {
+                let p = crate::units::generate(loc, &mut rng);
+                assert!(p.answer >= 0, "negative measurement answer");
+                assert!(!p.question.trim().is_empty());
+                assert!(!p.unit_label.trim().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn units_checkbox_makes_a_unit_session_that_advances() {
+        let mut app = App::new(Config::default());
+        // Only the Units checkbox on -> every problem is a measurement.
+        app.menu_ops = [false, false, false, false];
+        app.menu_units = true;
+        app.start_session(false);
+        app.set_area(Rect::new(0, 0, 80, 24));
+        assert!(app.current_is_unit, "units-only session must show a unit problem");
+
+        app.input = app.unit_problem.answer.to_string();
+        app.check_answer();
+        assert!(app.transition.is_some(), "correct answer should start a transition");
+
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for _ in 0..60 {
+            term.draw(|f| ui::draw(f, &app)).unwrap();
+            app.on_tick();
+            if app.transition.is_none() {
+                break;
+            }
+        }
+        assert!(app.transition.is_none());
+        assert!(app.input.is_empty(), "input clears for the next problem");
+        assert!(app.current_is_unit, "next problem is still a measurement");
+    }
+
+    #[test]
+    fn mixed_session_can_show_both_problem_types() {
+        // Arithmetic + units enabled: over many problems we should see both.
+        let mut app = App::new(Config::default());
+        app.menu_ops = [true, false, false, false];
+        app.menu_units = true;
+        app.set_area(Rect::new(0, 0, 80, 24));
+        let mut saw_unit = false;
+        let mut saw_arith = false;
+        for _ in 0..200 {
+            app.start_session(false);
+            if app.current_is_unit {
+                saw_unit = true;
+            } else {
+                saw_arith = true;
+            }
+            if saw_unit && saw_arith {
+                break;
+            }
+        }
+        assert!(saw_unit && saw_arith, "a mixed session should produce both kinds");
     }
 
     #[test]

@@ -98,21 +98,27 @@ fn sprite(pose: Pose, frame: u64) -> &'static [&'static str; HEIGHT as usize] {
 /// buffer.  `frame` selects the two-frame loop; pass a steadily increasing
 /// counter.
 pub fn draw_pose(buf: &mut Buffer, x: u16, y: u16, pose: Pose, frame: u64, style: Style) {
+    draw_pose_i32(buf, x as i32, y as i32, pose, frame, style);
+}
+
+/// Like [`draw_pose`] but with signed coordinates, so the duck can be half
+/// off-screen (sliding in from an edge) and clip cleanly.
+pub fn draw_pose_i32(buf: &mut Buffer, x: i32, y: i32, pose: Pose, frame: u64, style: Style) {
     let area = buf.area;
     for (row, line) in sprite(pose, frame).iter().enumerate() {
-        let cy = y + row as u16;
-        if cy < area.top() || cy >= area.bottom() {
+        let cy = y + row as i32;
+        if cy < area.top() as i32 || cy >= area.bottom() as i32 {
             continue;
         }
         for (col, ch) in line.chars().enumerate() {
             if ch == ' ' {
                 continue;
             }
-            let cx = x + col as u16;
-            if cx < area.left() || cx >= area.right() {
+            let cx = x + col as i32;
+            if cx < area.left() as i32 || cx >= area.right() as i32 {
                 continue;
             }
-            buf[(cx, cy)].set_char(ch).set_style(style);
+            buf[(cx as u16, cy as u16)].set_char(ch).set_style(style);
         }
     }
 }

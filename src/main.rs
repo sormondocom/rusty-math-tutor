@@ -20,6 +20,7 @@ mod strategy;
 mod student;
 mod transition;
 mod ui;
+mod units;
 
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
