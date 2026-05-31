@@ -45,8 +45,44 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::Settings => draw_settings(f, app, area),
         Screen::Stats => draw_stats(f, app, area),
         Screen::Teacher => draw_teacher(f, app, area),
+        Screen::Cinematic => draw_cinematic(f, app, area),
         Screen::Practice | Screen::Challenge => draw_session(f, app, area),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Milestone cinematics
+// ---------------------------------------------------------------------------
+
+/// Draw one cinematic scene into `buf` (also used to capture scenes for the
+/// transitions that animate between them).
+pub fn render_scene(area: Rect, buf: &mut Buffer, scene: &crate::cinematic::Scene) {
+    Block::default().style(Style::default().bg(BG)).render(area, buf);
+    let accent = Style::default().fg(scene.accent);
+
+    if let Some(big) = &scene.big {
+        let by = (area.top() + area.height.saturating_sub(font::GLYPH_H) / 2).saturating_sub(2);
+        font::draw_text(buf, center(area, font::text_width(big)), by, big, accent);
+        let hy = by + font::GLYPH_H + 1;
+        put_str(buf, center(area, scene.heading.chars().count() as u16), hy, &scene.heading, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        put_str(buf, center(area, scene.sub.chars().count() as u16), hy + 1, &scene.sub, accent.add_modifier(Modifier::BOLD));
+    } else {
+        let hy = area.top() + area.height / 2;
+        put_str(buf, center(area, scene.heading.chars().count() as u16), hy.saturating_sub(1), &scene.heading, accent.add_modifier(Modifier::BOLD));
+        put_str(buf, center(area, scene.sub.chars().count() as u16), hy + 1, &scene.sub, Style::default().fg(Color::White));
+    }
+}
+
+fn draw_cinematic(f: &mut Frame, app: &App, area: Rect) {
+    let buf = f.buffer_mut();
+    if let Some(c) = &app.cinematic {
+        if let Some(t) = &c.transition {
+            t.render(area, buf);
+        } else if let Some(scene) = c.scenes.get(c.index) {
+            render_scene(area, buf, scene);
+        }
+    }
+    put_str(buf, center(area, 21), area.bottom().saturating_sub(1), "press any key to skip", Style::default().fg(Color::DarkGray));
 }
 
 // ---------------------------------------------------------------------------
@@ -296,13 +332,24 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
     put_str(buf, col, area.top() + 3, format!("Operation:  < {} >", op.name()), Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
     put_str(buf, col, area.top() + 4, "Your own real-life examples shown in the Why? panel:", Style::default().fg(Color::Gray));
 
+    // When adding, a wrapping input box claims the lower part of the screen.
+    let input_box = if app.teacher_adding {
+        let box_h = 8u16.min(area.height.saturating_sub(9)).max(4);
+        let box_w = area.right().saturating_sub(col).saturating_sub(2).min(66).max(20);
+        let box_y = area.bottom().saturating_sub(box_h + 2);
+        Some(Rect { x: col, y: box_y, width: box_w, height: box_h })
+    } else {
+        None
+    };
+    let list_bottom = input_box.map_or(area.bottom().saturating_sub(2), |b| b.y.saturating_sub(1));
+
     let items = app.why_extras.items(op);
     let mut y = area.top() + 6;
     if items.is_empty() {
         put_str(buf, col + 2, y, "(none yet — press A to add one)", Style::default().fg(Color::DarkGray));
     } else {
         for it in items {
-            if y >= area.bottom().saturating_sub(4) {
+            if y >= list_bottom {
                 break;
             }
             put_str(buf, col + 2, y, clip(&format!("• {}", it), area.width.saturating_sub(4)), Style::default().fg(Color::White));
@@ -310,12 +357,31 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         }
     }
 
-    if app.teacher_adding {
-        let prompt = "New example: ";
-        let avail = area.width.saturating_sub(col - area.left() + prompt.len() as u16 + 2);
-        put_str(buf, col, area.bottom().saturating_sub(4), prompt, Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD));
-        put_str(buf, col + prompt.len() as u16, area.bottom().saturating_sub(4), format!("{}_", tail(&app.teacher_text, avail)), Style::default().fg(Color::White));
-        put_str(buf, col, area.bottom().saturating_sub(2), "Enter: save    Esc: cancel", Style::default().fg(Color::DarkGray));
+    if let Some(rect) = input_box {
+        Clear.render(rect, buf);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::LightYellow))
+            .title(" New example ")
+            .style(Style::default().bg(STAGE_BG));
+        let inner = block.inner(rect);
+        block.render(rect, buf);
+
+        // Echo the typed text wrapped to the box, with a caret, keeping the end
+        // in view if it overflows.
+        let rows = inner.height as usize;
+        let lines = wrap_chars(&format!("{}_", app.teacher_text), inner.width);
+        let start = lines.len().saturating_sub(rows);
+        for (i, line) in lines[start..].iter().enumerate() {
+            put_str(buf, inner.left(), inner.top() + i as u16, line, Style::default().fg(Color::White));
+        }
+
+        // Hint on the left, character count on the right, just below the box.
+        let foot_y = rect.bottom();
+        put_str(buf, col, foot_y, "Enter: save    Esc: cancel", Style::default().fg(Color::DarkGray));
+        let count = format!("{}/{}", app.teacher_text.chars().count(), crate::app::ANECDOTE_MAX);
+        put_str(buf, area.right().saturating_sub(count.len() as u16 + 1), foot_y, &count, Style::default().fg(Color::Gray));
     } else {
         put_str(buf, col, area.bottom().saturating_sub(2), "< > operation    A: add    Tab: records    Esc: log out", Style::default().fg(Color::DarkGray));
     }
@@ -548,6 +614,17 @@ fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
 /// Greedy word-wrap of `s` into lines no wider than `width` characters.
 fn wrap_text(s: &str, width: u16) -> Vec<String> {
     wrap_prefixed("", "", s, width)
+}
+
+/// Hard character wrap: break `s` every `width` columns, preserving spaces.
+/// Used for text-input echoes where the caret must always stay in view.
+fn wrap_chars(s: &str, width: u16) -> Vec<String> {
+    let width = width.max(1) as usize;
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return vec![String::new()];
+    }
+    chars.chunks(width).map(|c| c.iter().collect()).collect()
 }
 
 /// Word-wrap `text` so that, once `first` is prepended to the first line and
@@ -849,9 +926,17 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(panel);
     block.render(panel, buf);
 
+    // An encouraging word takes the top line when the student is struggling.
+    let enc_off: u16 = if let Some(msg) = &app.encourage {
+        put_str(buf, inner.left(), inner.top(), clip(msg, inner.width), Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD));
+        1
+    } else {
+        0
+    };
+
     // Header and footer controls.
     let header = format!("Way {}/{}: {}", idx + 1, strats.len(), s.title);
-    put_str(buf, inner.left(), inner.top(), clip(&header, inner.width), Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD));
+    put_str(buf, inner.left(), inner.top() + enc_off, clip(&header, inner.width), Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD));
 
     let mut controls = vec![if app.revealed { "R: hide answer" } else { "R: show answer" }.to_string()];
     if strats.len() > 1 {
@@ -864,9 +949,9 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
     // Content sits between header and footer.
     let content = Rect {
         x: inner.left(),
-        y: inner.top() + 2,
+        y: inner.top() + 2 + enc_off,
         width: inner.width,
-        height: inner.height.saturating_sub(3),
+        height: inner.height.saturating_sub(3 + enc_off),
     };
     if content.height == 0 {
         return;
@@ -1110,6 +1195,20 @@ mod tests {
             }
             assert!(lines[0].contains("Why it matters:"));
         }
+    }
+
+    #[test]
+    fn wrap_chars_stays_within_width_and_preserves_content() {
+        let s = "When I built a deck I added up every board length precisely.";
+        for width in [10u16, 24, 40] {
+            let lines = wrap_chars(s, width);
+            for line in &lines {
+                assert!(line.chars().count() <= width as usize);
+            }
+            // No characters are lost or invented.
+            assert_eq!(lines.concat(), s);
+        }
+        assert_eq!(wrap_chars("", 8), vec![String::new()]);
     }
 
     #[test]

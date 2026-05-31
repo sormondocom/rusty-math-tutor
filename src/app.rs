@@ -22,15 +22,33 @@ const MAX_INPUT: usize = 7;
 /// Number of selectable rows on the menu.
 const MENU_ITEMS: usize = 12;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
     Startup,
     Menu,
     Settings,
     Stats,
     Teacher,
+    Cinematic,
     Practice,
     Challenge,
+}
+
+/// How long each milestone-cinematic scene lingers before transitioning.
+const SCENE_DWELL: u32 = 24;
+/// Wrong answers on one problem before Deduction Duck steps in to encourage.
+const STRUGGLE_THRESHOLD: u32 = 3;
+/// Maximum length of a teacher-supplied "Why?" anecdote.
+pub const ANECDOTE_MAX: usize = 1024;
+
+/// A playing milestone celebration: a sequence of [`cinematic::Scene`]s that
+/// our transitions animate between.
+pub struct Cinematic {
+    pub scenes: Vec<crate::cinematic::Scene>,
+    pub index: usize,
+    dwell: u32,
+    pub transition: Option<Transition>,
+    started: Instant,
 }
 
 // Menu row indices.
@@ -85,6 +103,14 @@ impl Challenge {
 
     pub fn duration_secs(&self) -> u64 {
         self.duration.as_secs()
+    }
+
+    /// Push the start forward by `d` — used to refund time spent in a
+    /// milestone cinematic so the countdown stays fair.
+    fn extend(&mut self, d: Duration) {
+        if let Some(start) = self.start.checked_add(d) {
+            self.start = start;
+        }
     }
 }
 
@@ -169,6 +195,15 @@ pub struct App {
 
     pub challenge: Option<Challenge>,
 
+    // Milestone celebration.
+    pub cinematic: Option<Cinematic>,
+    cinematic_return: Screen,
+
+    // Struggle support: consecutive wrong answers on the current problem, and a
+    // one-shot encouraging line shown when Deduction Duck steps in.
+    wrong_streak: u32,
+    pub encourage: Option<String>,
+
     /// Most recent full-frame area, refreshed by [`App::set_area`] each loop so
     /// transition capture matches what is on screen.
     area: Rect,
@@ -222,6 +257,10 @@ impl App {
             teacher_msg: None,
             anim_frame: 0,
             challenge: None,
+            cinematic: None,
+            cinematic_return: Screen::Practice,
+            wrong_streak: 0,
+            encourage: None,
             area: Rect::new(0, 0, 80, 24),
             should_quit: false,
         }
@@ -256,18 +295,76 @@ impl App {
                 self.feedback = Feedback::None;
                 self.strategy_index = 0;
                 self.revealed = false;
+                self.wrong_streak = 0;
+                self.encourage = None;
             }
         }
 
-        // Challenge countdown.
-        if let Some(c) = &mut self.challenge {
-            if !c.finished && c.remaining_secs() == 0 {
-                c.finished = true;
-                self.help_active = false;
-                // Lock in the progress earned during the timed run.
-                self.roster.save();
+        // A playing milestone cinematic advances on its own clock.
+        if self.cinematic.is_some() {
+            self.tick_cinematic();
+        }
+
+        // Challenge countdown — frozen while a cinematic plays (the time is
+        // refunded when it ends, so a celebration never costs the student).
+        if self.cinematic.is_none() {
+            if let Some(c) = &mut self.challenge {
+                if !c.finished && c.remaining_secs() == 0 {
+                    c.finished = true;
+                    self.help_active = false;
+                    // Lock in the progress earned during the timed run.
+                    self.roster.save();
+                }
             }
         }
+    }
+
+    /// Advance the milestone cinematic: dwell on each scene, then transition to
+    /// the next, finishing once the last scene has been shown.
+    fn tick_cinematic(&mut self) {
+        let Some(mut c) = self.cinematic.take() else { return };
+        let mut finished = false;
+        if let Some(t) = &mut c.transition {
+            if t.advance() {
+                c.transition = None;
+                c.index += 1;
+                c.dwell = SCENE_DWELL;
+            }
+        } else {
+            c.dwell = c.dwell.saturating_sub(1);
+            if c.dwell == 0 {
+                if c.index + 1 < c.scenes.len() {
+                    let area = self.area;
+                    let from = capture_scene(area, &c.scenes[c.index]);
+                    let to = capture_scene(area, &c.scenes[c.index + 1]);
+                    c.transition = Some(Transition::new(from, to, &mut self.rng));
+                } else {
+                    finished = true;
+                }
+            }
+        }
+        if finished {
+            self.finish_cinematic(c);
+        } else {
+            self.cinematic = Some(c);
+        }
+    }
+
+    /// Tear down a cinematic and resume the lesson with the next problem.
+    fn finish_cinematic(&mut self, c: Cinematic) {
+        if let Some(ch) = &mut self.challenge {
+            ch.extend(c.started.elapsed());
+        }
+        self.screen = self.cinematic_return;
+        if let Some(next) = self.pending.take() {
+            self.current = next;
+        }
+        self.input.clear();
+        self.feedback = Feedback::None;
+        self.strategy_index = 0;
+        self.revealed = false;
+        self.wrong_streak = 0;
+        self.encourage = None;
     }
 
     // -- input --------------------------------------------------------------
@@ -288,6 +385,12 @@ impl App {
                 }
             }
             Screen::Teacher => self.on_teacher_key(key),
+            Screen::Cinematic => {
+                // Any key skips the celebration and resumes the lesson.
+                if let Some(c) = self.cinematic.take() {
+                    self.finish_cinematic(c);
+                }
+            }
             Screen::Practice | Screen::Challenge => self.on_session_key(key),
         }
     }
@@ -454,7 +557,7 @@ impl App {
                 self.teacher_text.pop();
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.teacher_text.chars().count() < 120 {
+                if self.teacher_text.chars().count() < ANECDOTE_MAX {
                     self.teacher_text.push(c);
                 }
             }
@@ -709,6 +812,9 @@ impl App {
         self.revealed = false;
         self.why_active = false;
         self.streak = 0;
+        self.wrong_streak = 0;
+        self.encourage = None;
+        self.cinematic = None;
         self.challenge = if challenge { Some(Challenge::new(CHALLENGE_LEN)) } else { None };
     }
 
@@ -738,26 +844,56 @@ impl App {
             let student = self.roster.current_mut();
             student.record(op);
             student.note_streak(streak);
+            let total = student.total();
+
+            self.wrong_streak = 0;
+            self.encourage = None;
             self.help_active = false;
-            self.begin_transition();
+
+            let next = problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng);
+            if crate::cinematic::is_milestone(total) {
+                self.start_cinematic(total, next);
+            } else {
+                self.begin_transition(next);
+            }
         } else {
             self.feedback = Feedback::Wrong;
             self.streak = 0;
+            self.wrong_streak += 1;
+            // After a few tries, Deduction Duck steps in with a kind word.
+            if self.wrong_streak >= STRUGGLE_THRESHOLD {
+                self.encourage = Some(crate::cinematic::struggle_message(&mut self.rng));
+                self.help_active = true;
+                self.strategy_index = 0;
+                self.revealed = false;
+            }
         }
     }
 
-    /// Capture the (correct) current card and a freshly generated next card,
-    /// then kick off a random transition between them.
-    fn begin_transition(&mut self) {
+    /// Capture the (correct) current card and the next card, then kick off a
+    /// random transition between them.
+    fn begin_transition(&mut self, next: Problem) {
         let area = ui::card_area(self.screen, self.area);
-
         let from = self.capture(area, &self.current, &self.input, Some(("✓  Correct!".to_string(), ratatui::style::Color::LightGreen)));
-
-        let next = problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng);
         let to = self.capture(area, &next, "", None);
-
         self.pending = Some(next);
         self.transition = Some(Transition::new(from, to, &mut self.rng));
+    }
+
+    /// Kick off a milestone celebration, holding `next` to resume afterwards.
+    fn start_cinematic(&mut self, total: u32, next: Problem) {
+        let name = self.roster.current().name.clone();
+        let scenes = crate::cinematic::scenes(&name, total, &mut self.rng);
+        self.pending = Some(next);
+        self.cinematic_return = self.screen;
+        self.cinematic = Some(Cinematic {
+            scenes,
+            index: 0,
+            dwell: SCENE_DWELL,
+            transition: None,
+            started: Instant::now(),
+        });
+        self.screen = Screen::Cinematic;
     }
 
     fn capture(&self, area: Rect, p: &Problem, input: &str, banner: Option<(String, ratatui::style::Color)>) -> Buffer {
@@ -771,6 +907,13 @@ impl App {
 fn bump(v: i64, up: bool, delta: i64, min: i64, max: i64) -> i64 {
     let next = if up { v + delta } else { v - delta };
     next.clamp(min, max)
+}
+
+/// Render a cinematic scene into a fresh buffer for transition capture.
+fn capture_scene(area: Rect, scene: &crate::cinematic::Scene) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    ui::render_scene(area, &mut buf, scene);
+    buf
 }
 
 // ---------------------------------------------------------------------------
@@ -816,6 +959,9 @@ mod tests {
             app.teacher_authed = true;
             app.teacher_view = TeacherView::Anecdotes;
             app.teacher_adding = true;
+            // A long anecdote exercises the wrapping input box and overflow.
+            app.teacher_text = "x".repeat(ANECDOTE_MAX);
+            term.draw(|f| ui::draw(f, &app)).unwrap();
             app.teacher_text = "When I tiled my kitchen floor".to_string();
             term.draw(|f| ui::draw(f, &app)).unwrap();
             app.teacher_adding = false;
@@ -833,6 +979,7 @@ mod tests {
                     app.start_session(false);
                     app.set_area(Rect::new(0, 0, w, h));
                     app.help_active = true;
+                    app.encourage = Some("Don't worry — mistakes help you grow!".to_string());
                     for _ in 0..10 {
                         app.on_tick();
                     }
@@ -950,6 +1097,52 @@ mod tests {
     }
 
     #[test]
+    fn milestone_triggers_cinematic_then_resumes() {
+        let mut app = App::new(Config::default());
+        app.menu_ops = [true, false, false, false]; // addition only
+        app.start_session(false);
+        app.set_area(Rect::new(0, 0, 80, 24));
+        // Sit at 6 solved so the next correct answer hits the 7 milestone.
+        app.roster.current_mut().solved = [6, 0, 0, 0];
+
+        app.input = app.current.answer.to_string();
+        app.check_answer();
+        assert_eq!(app.screen, Screen::Cinematic);
+        assert!(app.cinematic.is_some());
+
+        // Play it out; it must hand control back to the lesson.
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for _ in 0..600 {
+            term.draw(|f| ui::draw(f, &app)).unwrap();
+            app.on_tick();
+            if app.cinematic.is_none() {
+                break;
+            }
+        }
+        assert!(app.cinematic.is_none(), "cinematic should finish");
+        assert_eq!(app.screen, Screen::Practice);
+    }
+
+    #[test]
+    fn repeated_wrong_answers_summon_encouragement() {
+        let mut app = App::new(Config::default());
+        app.menu_ops = [true, false, false, false];
+        app.start_session(false);
+        let wrong = (app.current.answer + 1).to_string();
+        for _ in 0..STRUGGLE_THRESHOLD {
+            app.input = wrong.clone();
+            app.check_answer();
+        }
+        assert!(app.encourage.is_some(), "duck should offer encouragement");
+        assert!(app.help_active, "duck should appear");
+
+        // Getting it right clears the support and stops the duck struggling.
+        app.input = app.current.answer.to_string();
+        app.check_answer();
+        assert!(app.encourage.is_none());
+    }
+
+    #[test]
     fn student_progress_only_grows() {
         use crate::student::Student;
         let mut s = Student::new("Sam");
@@ -1015,6 +1208,39 @@ mod tests {
             }
         }
         assert!(seen, "teacher's custom reason never appeared");
+    }
+
+    /// Moderate add/subtract problems should get a *visual* number line, not the
+    /// plain text fallback — and every line's hops must land on the answer.
+    #[test]
+    fn arithmetic_keeps_a_visual_number_line() {
+        use crate::strategy::{strategies, Viz};
+        let cases = [
+            (12i64, 7i64, Op::Add),
+            (40, 30, Op::Add),
+            (23, 45, Op::Add),
+            (8, 6, Op::Add),
+            (53, 27, Op::Sub),
+            (50, 20, Op::Sub),
+            (12, 5, Op::Sub),
+            (100, 64, Op::Sub),
+        ];
+        for (a, b, op) in cases {
+            let answer = if op == Op::Add { a + b } else { a - b };
+            let p = problem::Problem { a, b, op, answer, accent: ratatui::style::Color::White };
+            let mut found = false;
+            for s in strategies(&p) {
+                if let Viz::NumberLine { stops, hops } = &s.viz {
+                    found = true;
+                    assert_eq!(stops.len(), hops.len() + 1, "stop/hop mismatch for {} {:?} {}", a, op, b);
+                    // A line lands on the answer (count-back/add) or on `a`
+                    // (count-up walks from b up to a).
+                    let last = *stops.last().unwrap();
+                    assert!(last == answer || last == a, "line for {} {:?} {} ends at {}", a, op, b, last);
+                }
+            }
+            assert!(found, "{} {:?} {} lost its number line", a, op, b);
+        }
     }
 
     /// Strategies are produced for every operation and grade, none empty.

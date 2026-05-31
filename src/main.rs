@@ -10,6 +10,7 @@
 //! with a fixed ~33 ms tick — deliberately lightweight for slow hardware.
 
 mod app;
+mod cinematic;
 mod config;
 mod duck;
 mod font;

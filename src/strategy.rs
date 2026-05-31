@@ -66,20 +66,19 @@ fn add(p: &Problem) -> Vec<Strategy> {
     let (a, b, ans) = (p.a, p.b, p.answer);
     let mut v = Vec::new();
 
-    // Count On — walk a +1 number line.
-    if (1..=8).contains(&b) && a + b <= 30 {
-        let stops: Vec<i64> = (0..=b).map(|i| a + i).collect();
-        let hops: Vec<String> = (0..b).map(|_| "+1".to_string()).collect();
+    // Number line — a +1 "count on" for small b, friendly ten-jumps otherwise.
+    if let Some((stops, hops, title, hint)) = add_number_line(a, b) {
         v.push(Strategy {
-            title: "Count On (Number Line)".to_string(),
-            steps: vec![format!("Start at {} and hop up {} ones.", a, b)],
+            title,
+            steps: vec![hint],
             reveal: vec![format!("You land on {}.", ans), format!("{} + {} = {}", a, b, ans)],
             viz: Viz::NumberLine { stops, hops },
         });
     } else if b >= 1 {
+        // Numbers too big for a tidy line — describe the single jump.
         v.push(Strategy::lines(
             "Jump on a Number Line",
-            vec![format!("Start at {} and make one big jump of {}.", a, b)],
+            vec![format!("Start at {} and add {}.", a, b)],
             vec![format!("{}  --+{}-->  {}", a, b, ans)],
         ));
     }
@@ -106,6 +105,99 @@ fn add(p: &Problem) -> Vec<Strategy> {
     }
 
     v
+}
+
+/// A built number-line walk: `(stops, hop labels, title, hint line)`.
+type NumberLine = (Vec<i64>, Vec<String>, String, String);
+
+/// Number line for `a + b`: single `+1` hops for small `b`, friendly ten-jumps
+/// otherwise.  `None` when `b` is too large for a tidy line.
+fn add_number_line(a: i64, b: i64) -> Option<NumberLine> {
+    if b <= 0 {
+        return None;
+    }
+    if b <= 8 {
+        let (stops, hops) = unit_walk(a, b, true);
+        return Some((stops, hops, "Count On (Number Line)".to_string(), format!("Start at {} and hop up {} ones.", a, b)));
+    }
+    let jumps = friendly_steps((10 - a % 10) % 10, b)?;
+    let (stops, hops) = walk(a, &jumps, true);
+    Some((stops, hops, "Jump on a Number Line".to_string(), format!("Start at {} and jump in friendly steps.", a)))
+}
+
+/// Number line counting **up** from `from` to `to` (the difference / "how far
+/// apart").  `None` when the gap is too large for a tidy line.
+fn count_up_line(from: i64, to: i64) -> Option<NumberLine> {
+    let amount = to - from;
+    if amount <= 0 {
+        return None;
+    }
+    let hint = format!("Start at {} and count up to {}.", from, to);
+    if amount <= 8 {
+        let (stops, hops) = unit_walk(from, amount, true);
+        return Some((stops, hops, "Count Up (Number Line)".to_string(), hint));
+    }
+    let jumps = friendly_steps((10 - from % 10) % 10, amount)?;
+    let (stops, hops) = walk(from, &jumps, true);
+    Some((stops, hops, "Count Up (Number Line)".to_string(), hint))
+}
+
+/// Number line counting **back** from `from` by `amount` (take-away).  `None`
+/// when `amount` is too large for a tidy line.
+fn count_back_line(from: i64, amount: i64) -> Option<NumberLine> {
+    if amount <= 0 {
+        return None;
+    }
+    if amount <= 8 {
+        let (stops, hops) = unit_walk(from, amount, false);
+        return Some((stops, hops, "Count Back (Number Line)".to_string(), format!("Start at {} and hop back {} ones.", from, amount)));
+    }
+    let jumps = friendly_steps(from % 10, amount)?;
+    let (stops, hops) = walk(from, &jumps, false);
+    Some((stops, hops, "Count Back (Number Line)".to_string(), format!("Start at {} and jump back in friendly steps.", from)))
+}
+
+/// Decompose `amount` into friendly jumps: a partial step to the nearest ten
+/// (`first_partial`), then whole tens, then the leftover ones.  `None` if it
+/// would take more than seven jumps.
+fn friendly_steps(first_partial: i64, amount: i64) -> Option<Vec<i64>> {
+    let mut jumps = Vec::new();
+    let mut rem = amount;
+    if first_partial > 0 && first_partial < amount {
+        jumps.push(first_partial);
+        rem -= first_partial;
+    }
+    for _ in 0..(rem / 10) {
+        jumps.push(10);
+    }
+    if rem % 10 > 0 {
+        jumps.push(rem % 10);
+    }
+    if jumps.is_empty() || jumps.len() > 7 {
+        None
+    } else {
+        Some(jumps)
+    }
+}
+
+/// Stops and `±1` hop labels for a single-unit walk of length `n`.
+fn unit_walk(start: i64, n: i64, up: bool) -> (Vec<i64>, Vec<String>) {
+    let stops = (0..=n).map(|i| if up { start + i } else { start - i }).collect();
+    let hops = (0..n).map(|_| if up { "+1".to_string() } else { "-1".to_string() }).collect();
+    (stops, hops)
+}
+
+/// Stops and signed hop labels for a walk over the given `jumps`.
+fn walk(start: i64, jumps: &[i64], up: bool) -> (Vec<i64>, Vec<String>) {
+    let mut stops = vec![start];
+    let mut hops = Vec::new();
+    let mut cur = start;
+    for j in jumps {
+        cur = if up { cur + j } else { cur - j };
+        stops.push(cur);
+        hops.push(format!("{}{}", if up { "+" } else { "-" }, j));
+    }
+    (stops, hops)
 }
 
 fn make_ten(a: i64, b: i64, ans: i64) -> Option<Strategy> {
@@ -162,31 +254,26 @@ fn sub(p: &Problem) -> Vec<Strategy> {
         return v;
     }
 
-    // Count Up — walk the gap from b up to a.
-    if b > 0 && b % 10 != 0 && b + (10 - b % 10) % 10 <= a {
-        let to_ten = (10 - b % 10) % 10;
-        let stop = b + to_ten;
-        let rest = a - stop;
+    // Count Up — find the difference by walking from b up to a.
+    if let Some((stops, hops, title, hint)) = count_up_line(b, a) {
         v.push(Strategy {
-            title: "Count Up (Number Line)".to_string(),
-            steps: vec![format!("Start at {} and count up to {}.", b, a)],
-            reveal: vec![format!("Hops: {} + {} = {}", to_ten, rest, ans)],
-            viz: Viz::NumberLine {
-                stops: vec![b, stop, a],
-                hops: vec![format!("+{}", to_ten), format!("+{}", rest)],
-            },
+            title,
+            steps: vec![hint],
+            reveal: vec![format!("The hops add up to {}.", ans), format!("{} - {} = {}", a, b, ans)],
+            viz: Viz::NumberLine { stops, hops },
         });
-    } else if (1..=8).contains(&b) {
-        // Count Back — walk left one at a time.
-        let stops: Vec<i64> = (0..=b).map(|i| a - i).collect();
-        let hops: Vec<String> = (0..b).map(|_| "-1".to_string()).collect();
+    }
+    // Count Back — take away by walking from a down to the answer.
+    if let Some((stops, hops, title, hint)) = count_back_line(a, b) {
         v.push(Strategy {
-            title: "Count Back (Number Line)".to_string(),
-            steps: vec![format!("Start at {} and hop back {} ones.", a, b)],
+            title,
+            steps: vec![hint],
             reveal: vec![format!("{} - {} = {}", a, b, ans)],
             viz: Viz::NumberLine { stops, hops },
         });
-    } else {
+    }
+    // Neither line fit (very large numbers) — a plain take-away.
+    if v.is_empty() {
         v.push(Strategy::lines(
             "Count Back",
             vec![format!("Start at {}, take away {}.", a, b)],

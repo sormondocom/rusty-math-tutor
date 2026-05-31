@@ -6,11 +6,12 @@
 //!   blinds, circle, slide, diagonal).  Pure integer work, great on slow
 //!   terminals.
 //! * **Particle effects** — the old equation *explodes* into flying glyph
-//!   pieces, *swirls* into the centre, or the new card is celebrated with
-//!   *fireworks*.  These borrow the analytic-physics model from the
-//!   console-music-player visualizer: every particle's position is a closed
-//!   form of elapsed frames, so there is no per-tick simulation state to keep
-//!   in sync.
+//!   pieces or *swirls* into the centre; the new card warps in behind a
+//!   *starburst*, gets celebrated with *fireworks*, or is buzzed by a fleet of
+//!   *alien ships* / a shower of tumbling *asteroids*.  These borrow the
+//!   analytic-physics model from the console-music-player visualizer: every
+//!   particle's position is a closed form of elapsed frames, so there is no
+//!   per-tick simulation state to keep in sync.
 //!
 //! All effects animate two captured [`Buffer`]s — the outgoing `from` card and
 //! the incoming `to` card — from one to the other.
@@ -49,6 +50,12 @@ pub enum Effect {
     Explode,
     Swirl,
     Fireworks,
+    /// Stars zoom outward from the centre as the new card warps in.
+    Starburst,
+    /// Flying-saucer fleet crosses the screen with tractor beams.
+    AlienShips,
+    /// Tumbling asteroids streak across, trailing debris.
+    Asteroids,
 }
 
 impl Effect {
@@ -67,7 +74,17 @@ impl Effect {
         .map(Effect::Reveal)
         .collect();
         // The showy ones are weighted a little heavier — they hold attention.
-        v.extend([Effect::Explode, Effect::Explode, Effect::Swirl, Effect::Swirl, Effect::Fireworks, Effect::Fireworks]);
+        v.extend([
+            Effect::Explode,
+            Effect::Swirl,
+            Effect::Fireworks,
+            Effect::Starburst,
+            Effect::Starburst,
+            Effect::AlienShips,
+            Effect::AlienShips,
+            Effect::Asteroids,
+            Effect::Asteroids,
+        ]);
         v
     }
 
@@ -113,6 +130,30 @@ struct Rocket {
     sparks: Vec<Spark>,
 }
 
+/// A star in the [`Effect::Starburst`] effect — flies straight out from centre.
+struct Star {
+    vx: f32,
+    vy: f32,
+    color: Color,
+}
+
+#[derive(Copy, Clone)]
+enum SpriteKind {
+    Ufo,
+    Asteroid,
+}
+
+/// A sprite that drifts linearly across the card (saucer or asteroid).
+struct Mover {
+    x0: f32,
+    y0: f32,
+    vx: f32,
+    vy: f32,
+    kind: SpriteKind,
+    color: Color,
+    phase: f32,
+}
+
 const FIREWORK_COLORS: [Color; 6] = [
     Color::LightRed,
     Color::LightYellow,
@@ -121,6 +162,12 @@ const FIREWORK_COLORS: [Color; 6] = [
     Color::LightMagenta,
     Color::White,
 ];
+
+const STAR_COLORS: [Color; 4] = [Color::White, Color::LightCyan, Color::LightYellow, Color::Gray];
+
+const ALIEN_COLORS: [Color; 4] = [Color::LightGreen, Color::LightCyan, Color::LightMagenta, Color::Green];
+
+const ROCK_COLORS: [Color; 3] = [Color::Rgb(150, 130, 110), Color::Rgb(120, 110, 100), Color::Rgb(95, 90, 85)];
 
 // ---------------------------------------------------------------------------
 // Transition
@@ -134,6 +181,8 @@ pub struct Transition {
     seed: u32,
     glyphs: Vec<Glyph>,
     rockets: Vec<Rocket>,
+    stars: Vec<Star>,
+    movers: Vec<Mover>,
 }
 
 impl Transition {
@@ -153,7 +202,16 @@ impl Transition {
             Effect::Fireworks => build_rockets(area, effect.duration(), rng),
             _ => Vec::new(),
         };
-        Transition { effect, from, to, progress: 0.0, seed: rng.gen(), glyphs, rockets }
+        let stars = match effect {
+            Effect::Starburst => build_stars(rng),
+            _ => Vec::new(),
+        };
+        let movers = match effect {
+            Effect::AlienShips => build_movers(area, SpriteKind::Ufo, effect.duration(), rng),
+            Effect::Asteroids => build_movers(area, SpriteKind::Asteroid, effect.duration(), rng),
+            _ => Vec::new(),
+        };
+        Transition { effect, from, to, progress: 0.0, seed: rng.gen(), glyphs, rockets, stars, movers }
     }
 
     /// Advance one tick; returns `true` once finished.
@@ -168,6 +226,8 @@ impl Transition {
             Effect::Reveal(kind) => self.render_reveal(kind, area, buf, p),
             Effect::Explode | Effect::Swirl => self.render_glyph_particles(area, buf, p),
             Effect::Fireworks => self.render_fireworks(area, buf, p),
+            Effect::Starburst => self.render_starburst(area, buf, p),
+            Effect::AlienShips | Effect::Asteroids => self.render_movers(area, buf, p),
         }
     }
 
@@ -215,13 +275,14 @@ impl Transition {
 
     // -- particle effects ---------------------------------------------------
 
-    /// Draw the incoming card with its equation glyphs gated by `p` (so the new
-    /// answer materialises), used as the backdrop for every particle effect.
-    fn paint_backdrop(&self, area: Rect, buf: &mut Buffer, p: f32) {
+    /// Draw the incoming card, hiding its equation glyphs until `reveal(x, y)`
+    /// returns true — used as the backdrop for every particle effect so the new
+    /// answer materialises behind the action.
+    fn paint_backdrop(&self, area: Rect, buf: &mut Buffer, reveal: impl Fn(u16, u16) -> bool) {
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
                 let toc = &self.to[(x, y)];
-                buf[(x, y)] = if toc.symbol() == GLYPH && cell_noise(x, y, self.seed) > p {
+                buf[(x, y)] = if toc.symbol() == GLYPH && !reveal(x, y) {
                     let mut blank = Cell::EMPTY;
                     blank.set_bg(BG);
                     blank
@@ -232,8 +293,13 @@ impl Transition {
         }
     }
 
+    /// The default dissolve reveal (a glyph cell appears once its noise ≤ p).
+    fn dissolve_reveal(&self, p: f32) -> impl Fn(u16, u16) -> bool + '_ {
+        move |x, y| cell_noise(x, y, self.seed) <= p
+    }
+
     fn render_glyph_particles(&self, area: Rect, buf: &mut Buffer, p: f32) {
-        self.paint_backdrop(area, buf, p);
+        self.paint_backdrop(area, buf, self.dissolve_reveal(p));
         let f = p * self.effect.duration();
         let dur = self.effect.duration();
         let cx = area.left() as f32 + area.width as f32 / 2.0;
@@ -260,7 +326,7 @@ impl Transition {
     }
 
     fn render_fireworks(&self, area: Rect, buf: &mut Buffer, p: f32) {
-        self.paint_backdrop(area, buf, p);
+        self.paint_backdrop(area, buf, self.dissolve_reveal(p));
         let f = p * self.effect.duration();
         let bottom = area.bottom().saturating_sub(1) as f32;
         const SPARK_LIFE: f32 = 16.0;
@@ -289,6 +355,52 @@ impl Transition {
                     let px = r.x + s.vx * bt;
                     let py = r.apex_y + s.vy * bt + 0.5 * GRAV * bt * bt;
                     plot(buf, area, px, py, glyph, s.color);
+                }
+            }
+        }
+    }
+
+    fn render_starburst(&self, area: Rect, buf: &mut Buffer, p: f32) {
+        let cx = area.left() as f32 + area.width as f32 / 2.0;
+        let cy = area.top() as f32 + area.height as f32 / 2.0;
+        let hw = (area.width as f32 / 2.0).max(1.0);
+        let hh = (area.height as f32 / 2.0).max(1.0);
+
+        // The new card warps in from the centre outward, in step with the stars.
+        self.paint_backdrop(area, buf, |x, y| {
+            let dx = (x as f32 - cx) / hw;
+            let dy = (y as f32 - cy) / hh;
+            (dx * dx + dy * dy).sqrt() <= p * 1.5
+        });
+
+        let f = p * self.effect.duration();
+        for (i, s) in self.stars.iter().enumerate() {
+            plot(buf, area, cx + s.vx * f, cy + s.vy * f, star_glyph(f, i), s.color);
+        }
+    }
+
+    fn render_movers(&self, area: Rect, buf: &mut Buffer, p: f32) {
+        self.paint_backdrop(area, buf, self.dissolve_reveal(p));
+        let f = p * self.effect.duration();
+
+        for m in &self.movers {
+            let px = m.x0 + m.vx * f;
+            let py = m.y0 + m.vy * f;
+            match m.kind {
+                SpriteKind::Ufo => {
+                    // A gentle hover bob on top of the cruise.
+                    let by = py + (f * 0.25 + m.phase).sin();
+                    draw_ufo(buf, area, px, by, m.color, f);
+                }
+                SpriteKind::Asteroid => {
+                    // A short debris trail behind the direction of travel.
+                    let speed = (m.vx * m.vx + m.vy * m.vy).sqrt().max(0.001);
+                    for k in 1..=2 {
+                        let tx = px - m.vx / speed * (k as f32 * 1.6);
+                        let ty = py - m.vy / speed * (k as f32 * 1.6);
+                        plot(buf, area, tx, ty, "·", Color::Rgb(80, 75, 70));
+                    }
+                    draw_asteroid(buf, area, px, py, m.color, f + m.phase);
                 }
             }
         }
@@ -380,6 +492,59 @@ fn build_rockets(area: Rect, duration: f32, rng: &mut impl Rng) -> Vec<Rocket> {
     rockets
 }
 
+fn build_stars(rng: &mut impl Rng) -> Vec<Star> {
+    let count = rng.gen_range(45..=75);
+    (0..count)
+        .map(|_| {
+            let ang = rng.gen_range(0.0..TAU);
+            let speed = rng.gen_range(0.5..1.8);
+            Star {
+                vx: ang.cos() * speed,
+                vy: ang.sin() * speed * 0.5, // halve vertically: cells are tall
+                color: *STAR_COLORS.choose(rng).unwrap(),
+            }
+        })
+        .collect()
+}
+
+fn build_movers(area: Rect, kind: SpriteKind, dur: f32, rng: &mut impl Rng) -> Vec<Mover> {
+    let count = match kind {
+        SpriteKind::Ufo => rng.gen_range(3..=5),
+        SpriteKind::Asteroid => rng.gen_range(4..=7),
+    };
+    let span = area.width as f32 + 16.0;
+    let top = area.top() as f32;
+    let h = area.height as f32;
+
+    (0..count)
+        .map(|_| {
+            let from_left = rng.gen_bool(0.5);
+            let dir = if from_left { 1.0 } else { -1.0 };
+            let x0 = if from_left { area.left() as f32 - 8.0 } else { area.right() as f32 + 8.0 };
+            match kind {
+                SpriteKind::Ufo => Mover {
+                    x0,
+                    y0: top + rng.gen_range(0.12..0.78) * h,
+                    vx: dir * span / dur * rng.gen_range(0.9..1.3),
+                    vy: 0.0,
+                    kind,
+                    color: *ALIEN_COLORS.choose(rng).unwrap(),
+                    phase: rng.gen_range(0.0..TAU),
+                },
+                SpriteKind::Asteroid => Mover {
+                    x0,
+                    y0: top + rng.gen_range(0.0..1.0) * h,
+                    vx: dir * span / dur * rng.gen_range(0.8..1.2),
+                    vy: rng.gen_range(-0.25..0.25),
+                    kind,
+                    color: *ROCK_COLORS.choose(rng).unwrap(),
+                    phase: rng.gen_range(0.0..50.0),
+                },
+            }
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -405,6 +570,55 @@ fn burst_glyph(bt: f32) -> &'static str {
         9..=12 => "•",
         _ => ".",
     }
+}
+
+/// A twinkling star glyph that cycles as the star travels.
+fn star_glyph(f: f32, i: usize) -> &'static str {
+    match (f as usize + i) % 8 {
+        0 | 1 => "+",
+        2 | 3 => "*",
+        4 | 5 => "·",
+        _ => ".",
+    }
+}
+
+/// Stamp a one-row sprite string (spaces are transparent) with its left edge at
+/// `left`, clipped to `area`.
+fn stamp(buf: &mut Buffer, area: Rect, line: &str, left: f32, y: f32, color: Color) {
+    for (i, ch) in line.chars().enumerate() {
+        if ch == ' ' {
+            continue;
+        }
+        let mut tmp = [0u8; 4];
+        plot(buf, area, left + i as f32, y, ch.encode_utf8(&mut tmp), color);
+    }
+}
+
+/// A little flying saucer centred at `(cx, cy)`, with a blinking tractor beam.
+fn draw_ufo(buf: &mut Buffer, area: Rect, cx: f32, cy: f32, color: Color, f: f32) {
+    let left = cx - 3.0; // sprites are 7 cells wide
+    stamp(buf, area, " .-^-. ", left, cy - 1.0, color);
+    stamp(buf, area, "(__o__)", left, cy, color);
+    // Tractor beam pulses below the saucer.
+    if (f as u32 / 3) % 2 == 0 {
+        for k in 1..=3 {
+            plot(buf, area, cx, cy + 1.0 + k as f32, ":", Color::Rgb(120, 220, 160));
+        }
+    }
+}
+
+/// A tumbling asteroid centred at `(cx, cy)`; `t` advances the rotation.
+fn draw_asteroid(buf: &mut Buffer, area: Rect, cx: f32, cy: f32, color: Color, t: f32) {
+    // Four rough rotation frames (3 wide, 2 tall).
+    const FRAMES: [[&str; 2]; 4] = [
+        [" # ", "###"],
+        ["## ", " ##"],
+        ["###", " # "],
+        [" ##", "## "],
+    ];
+    let frame = &FRAMES[(t as usize / 3) % FRAMES.len()];
+    stamp(buf, area, frame[0], cx - 1.0, cy, color);
+    stamp(buf, area, frame[1], cx - 1.0, cy + 1.0, color);
 }
 
 /// Deterministic per-cell noise in `0.0..1.0` from a cheap integer hash.
