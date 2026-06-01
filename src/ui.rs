@@ -336,6 +336,211 @@ pub fn render_unit_card(area: Rect, buf: &mut Buffer, p: &UnitProblem, input: &s
     put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1), hints, Style::default().fg(Color::DarkGray));
 }
 
+// ---------------------------------------------------------------------------
+// Geometry — hollow (outlined) shapes for perimeter, area, and volume
+// ---------------------------------------------------------------------------
+
+/// Geometry's accent colour.
+const GEO_ACCENT: Color = Color::LightGreen;
+/// Colour for the dimension numbers labelled on a shape's edges.
+const GEO_DIM: Color = Color::LightYellow;
+
+/// Draw a geometry card: the question, an outlined shape with its dimensions
+/// labelled, and the answer the student types (with its unit).
+pub fn render_geometry_card(area: Rect, buf: &mut Buffer, p: &crate::geometry::GeometryProblem, input: &str, banner: Option<(String, Color)>) {
+    use crate::geometry::GeoShape;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(GEO_ACCENT))
+        .title(" Geometry ")
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    // Question.
+    let q = p.question();
+    let mut y = inner.top() + 1;
+    for line in wrap_text(&q, inner.width.saturating_sub(4)).iter().take(2) {
+        put_str(buf, center(inner, line.chars().count() as u16), y, line, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        y += 1;
+    }
+
+    // The outlined shape occupies the middle band.
+    let answer_h = 4;
+    let band = Rect {
+        x: inner.left() + 1,
+        y: y + 1,
+        width: inner.width.saturating_sub(2),
+        height: inner.bottom().saturating_sub(y + 1 + answer_h + 1),
+    };
+    if band.height >= 4 && band.width >= 12 {
+        match p.shape {
+            GeoShape::Rect { w, h } => draw_geo_rect(buf, band, w, h),
+            GeoShape::Triangle { base, height, sides } => draw_geo_triangle(buf, band, base, height, sides),
+            GeoShape::Circle { r } => draw_geo_circle(buf, band, r),
+            GeoShape::Box3 { l, w, h } => draw_geo_box(buf, band, l, w, h),
+        }
+    }
+
+    // The answer the student types, with its unit (a π coefficient for circles).
+    let ay = inner.bottom().saturating_sub(answer_h + 1);
+    put_str(buf, center(inner, 12), ay, "Your answer:", Style::default().fg(Color::Gray));
+    let num = if input.is_empty() { "?" } else { input };
+    let shown = format!("{}{} {}", num, if p.pi { "π" } else { "" }, p.unit);
+    put_str(buf, center(inner, shown.chars().count() as u16), ay + 1, &shown, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+
+    if let Some((text, color)) = banner {
+        put_str(buf, center(inner, text.chars().count() as u16), ay + 2, &text, Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
+
+    let hints = "Type a whole number    Enter check    H help duck    Esc menu";
+    put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1), hints, Style::default().fg(Color::DarkGray));
+}
+
+/// Map a shape's unit dimensions to cell dimensions, honouring the ~2:1
+/// width:height aspect of a terminal cell, fitting within `(max_w, max_h)`.
+fn fit_cells(uw: i64, uh: i64, max_w: u16, max_h: u16) -> (u16, u16) {
+    let want_w = uw.max(1) as f32 * 2.0;
+    let want_h = uh.max(1) as f32;
+    let s = (max_w as f32 / want_w).min(max_h as f32 / want_h).min(2.4).max(0.05);
+    let cw = ((want_w * s).round() as u16).clamp(6, max_w.max(6));
+    let ch = ((want_h * s).round() as u16).clamp(2, max_h.max(2));
+    (cw, ch)
+}
+
+/// A hollow rectangle (or square), scaled to its proportions, with the width
+/// labelled below and the height to the right.
+fn draw_geo_rect(buf: &mut Buffer, band: Rect, w: i64, h: i64) {
+    let style = Style::default().fg(GEO_ACCENT);
+    let (bw, bh) = fit_cells(w, h, band.width.saturating_sub(8).min(40), band.height.saturating_sub(3).min(9));
+    let x0 = center(band, bw);
+    let y0 = band.top() + band.height.saturating_sub(bh + 1) / 2;
+
+    put_str(buf, x0, y0, format!("┌{}┐", "─".repeat((bw - 2) as usize)), style);
+    for r in 1..bh - 1 {
+        put_str(buf, x0, y0 + r, "│", style);
+        put_str(buf, x0 + bw - 1, y0 + r, "│", style);
+    }
+    put_str(buf, x0, y0 + bh - 1, format!("└{}┘", "─".repeat((bw - 2) as usize)), style);
+
+    // Dimensions: width centred below the box, height to the right.
+    let wl = w.to_string();
+    put_str(buf, x0 + bw / 2 - (wl.len() as u16 / 2), y0 + bh, &wl, Style::default().fg(GEO_DIM));
+    let hl = h.to_string();
+    put_str(buf, x0 + bw + 1, y0 + bh / 2, &hl, Style::default().fg(GEO_DIM));
+}
+
+/// A hollow isosceles triangle with contiguous `/ \` slopes (one column per row,
+/// so the edges never break up), labelled with its base+height (area) or its
+/// three side lengths (perimeter).
+fn draw_geo_triangle(buf: &mut Buffer, band: Rect, base: i64, height: i64, sides: Option<[i64; 3]>) {
+    let style = Style::default().fg(GEO_ACCENT);
+    let rows = band.height.saturating_sub(3).clamp(3, 7);
+    let cx = band.left() + band.width / 2;
+    let y0 = band.top() + band.height.saturating_sub(rows + 1) / 2;
+
+    for r in 0..rows {
+        let lx = cx.saturating_sub(r);
+        let rx = cx + r + 1;
+        if r == 0 {
+            put_str(buf, cx, y0, "/\\", style);
+        } else if r == rows - 1 {
+            put_str(buf, lx, y0 + r, "/", style);
+            put_str(buf, lx + 1, y0 + r, "_".repeat(rx.saturating_sub(lx + 1) as usize), style);
+            put_str(buf, rx, y0 + r, "\\", style);
+        } else {
+            put_str(buf, lx, y0 + r, "/", style);
+            put_str(buf, rx, y0 + r, "\\", style);
+        }
+    }
+
+    let label = match sides {
+        Some([a, b, c]) => format!("sides: {}, {}, {} cm", a, b, c),
+        None => format!("base {} cm,  height {} cm", base, height),
+    };
+    put_str(buf, center(band, label.chars().count() as u16), y0 + rows, &label, Style::default().fg(GEO_DIM));
+}
+
+/// A hollow circle, drawn in a clean hand-rounded outline sized to its radius,
+/// with the radius labelled.  Circumference / area are asked in terms of π.
+fn draw_geo_circle(buf: &mut Buffer, band: Rect, r: i64) {
+    let style = Style::default().fg(GEO_ACCENT);
+    // Pick a circle that fits the band; smaller radii get the smaller art.
+    let small: &[&str] = &[" .--. ", "/    \\", "\\    /", " '--' "];
+    let medium: &[&str] = &[" .---. ", "/     \\", "|     |", "\\     /", " '---' "];
+    let large: &[&str] = &["  .----.  ", " /      \\ ", "|        |", "|        |", " \\      / ", "  '----'  "];
+    let art = if r <= 3 || band.height < 6 {
+        small
+    } else if r <= 6 || band.height < 7 {
+        medium
+    } else {
+        large
+    };
+
+    let bw = art.iter().map(|l| l.chars().count()).max().unwrap_or(1) as u16;
+    let x0 = center(band, bw);
+    let y0 = band.top() + band.height.saturating_sub(art.len() as u16 + 1) / 2;
+    for (i, line) in art.iter().enumerate() {
+        put_str(buf, x0, y0 + i as u16, line, style);
+    }
+
+    // Centre dot and the radius label beneath.
+    put_str(buf, x0 + bw / 2, y0 + art.len() as u16 / 2, "·", Style::default().fg(GEO_DIM));
+    let label = format!("radius {} cm", r);
+    put_str(buf, center(band, label.chars().count() as u16), y0 + art.len() as u16 + 1, &label, Style::default().fg(GEO_DIM));
+}
+
+/// A crisp wireframe cuboid (or cube) in cabinet projection, scaled to its
+/// length × height with a depth offset from its width, edges labelled.
+fn draw_geo_box(buf: &mut Buffer, band: Rect, l: i64, w: i64, h: i64) {
+    let style = Style::default().fg(GEO_ACCENT);
+    let depth = ((w as u16 + 1) / 2).clamp(2, 3);
+    let (fw, fh) = fit_cells(
+        l,
+        h,
+        band.width.saturating_sub(8 + depth).min(34),
+        band.height.saturating_sub(4 + depth).min(8),
+    );
+    let fw = fw.max(6);
+    let fh = fh.max(3);
+    // Front-face top-left, leaving room above/right for the depth and labels.
+    let x0 = band.left() + (band.width.saturating_sub(fw + depth)) / 2;
+    let y0 = band.top() + depth + 1;
+
+    // Front face.
+    put_str(buf, x0, y0, format!("┌{}┐", "─".repeat((fw - 2) as usize)), style);
+    for r in 1..fh - 1 {
+        put_str(buf, x0, y0 + r, "│", style);
+        put_str(buf, x0 + fw - 1, y0 + r, "│", style);
+    }
+    put_str(buf, x0, y0 + fh - 1, format!("└{}┘", "─".repeat((fw - 2) as usize)), style);
+
+    // Depth: diagonals up-right from the two top corners and the bottom-right
+    // corner, plus the visible back top edge and back right edge.
+    for i in 1..depth {
+        put_str(buf, x0 + i, y0.saturating_sub(i), "╱", style);
+        put_str(buf, x0 + fw - 1 + i, y0.saturating_sub(i), "╱", style);
+        put_str(buf, x0 + fw - 1 + i, y0 + fh - 1 - i, "╱", style);
+    }
+    let bx = x0 + depth;
+    let by = y0.saturating_sub(depth);
+    put_str(buf, bx, by, format!("┌{}┐", "─".repeat((fw - 2) as usize)), style);
+    for r in 1..fh - 1 {
+        put_str(buf, bx + fw - 1, by + r, "│", style);
+    }
+    put_str(buf, bx + fw - 1, by + fh - 1, "┘", style);
+
+    // Edge labels: length below, height to the left, width along the top depth.
+    let ll = l.to_string();
+    put_str(buf, x0 + fw / 2 - (ll.len() as u16 / 2), y0 + fh, &ll, Style::default().fg(GEO_DIM));
+    let hl = h.to_string();
+    put_str(buf, x0.saturating_sub(1 + hl.len() as u16), y0 + fh / 2, &hl, Style::default().fg(GEO_DIM));
+    // Width (depth) just past the back-top-right corner, with a gap.
+    let wl = w.to_string();
+    put_str(buf, bx + fw + 1, by, &wl, Style::default().fg(GEO_DIM));
+}
+
 fn theme_color(theme: Theme) -> Color {
     match theme {
         Theme::Cup => Color::LightYellow,
@@ -718,6 +923,7 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push((format!("{} Units of Measure", mark(app.menu_units)), "(measuring problems)"));
     items.push((format!("{} Fractions", mark(app.menu_fractions)), "(shapes & pieces)"));
     items.push((format!("{} Percentages", mark(app.menu_percents)), "(shapes out of 100)"));
+    items.push((format!("{} Geometry", mark(app.menu_geometry)), "(perimeter, area, volume)"));
     items.push((format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)"));
     items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
     items.push(("My Progress...".to_string(), "(Enter to view)"));
@@ -887,7 +1093,6 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
         put_str(buf, col + 11 + bar_w + 1, y, format!("{}", n), Style::default().fg(Color::LightYellow));
         y += 1;
     }
-    y += 1;
 
     if s.best_streak > 0 {
         put_str(buf, col, y, format!("★ Best streak: {} in a row!", s.best_streak), Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD));
@@ -896,7 +1101,7 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
 
     // An encouraging message that grows with effort — never a comparison.
     let msg = encouragement(total);
-    put_str(buf, col, y + 1, msg, Style::default().fg(Color::LightCyan));
+    put_str(buf, col, y, msg, Style::default().fg(Color::LightCyan));
 
     put_str(buf, col, area.bottom().saturating_sub(2), "Every problem makes you stronger.   Esc: back", Style::default().fg(Color::DarkGray));
 }
@@ -1041,8 +1246,8 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
 }
 
 /// Short column headers for each section, in [`Topic::ALL`] order.  Kept to a
-/// few characters so all seven sections fit one row.
-const REC_COLS: [&str; 7] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct"];
+/// few characters so all sections fit one row.
+const REC_COLS: [&str; 8] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct", "Geo"];
 /// Left edge of the name column within the 5-wide section grid.
 const REC_NAME_W: u16 = 12;
 /// Width of each per-section count column.
@@ -1201,6 +1406,14 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
                     draw_duck_gag(f.buffer_mut(), inner, p.theme, app.anim_frame);
                 }
             }
+            Active::Geo(g) => {
+                let banner = match app.feedback {
+                    Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+                    Feedback::Wrong => Some(("✗  Not quite — measure again!".to_string(), Color::LightRed)),
+                    Feedback::None => None,
+                };
+                render_geometry_card(card_area, f.buffer_mut(), g, &app.input, banner);
+            }
             Active::Arith(p) => {
                 let banner = feedback_banner(app);
                 render_card(card_area, f.buffer_mut(), p, &app.input, app.config.layout, banner);
@@ -1213,6 +1426,7 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
         match &app.current {
             Active::Shape(s) => draw_hint_panel(f, app, card_area, &s.hint, s.answer_label()),
             Active::Unit(u) => draw_hint_panel(f, app, card_area, &u.hint, format!("Answer: {} {}", u.answer, u.unit_label)),
+            Active::Geo(g) => draw_hint_panel(f, app, card_area, &g.hint, g.answer_label()),
             Active::Arith(p) => draw_help_overlay(f, app, card_area, p),
         }
     }

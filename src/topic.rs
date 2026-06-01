@@ -16,11 +16,12 @@ pub enum Topic {
     Units,
     Fractions,
     Percentages,
+    Geometry,
 }
 
 impl Topic {
     /// Every topic, in menu / progress order.
-    pub const ALL: [Topic; 7] = [
+    pub const ALL: [Topic; 8] = [
         Topic::Add,
         Topic::Sub,
         Topic::Mul,
@@ -28,6 +29,7 @@ impl Topic {
         Topic::Units,
         Topic::Fractions,
         Topic::Percentages,
+        Topic::Geometry,
     ];
 
     pub fn index(self) -> usize {
@@ -39,6 +41,7 @@ impl Topic {
             Topic::Units => 4,
             Topic::Fractions => 5,
             Topic::Percentages => 6,
+            Topic::Geometry => 7,
         }
     }
 
@@ -52,6 +55,7 @@ impl Topic {
             Topic::Units => "Units of Measure",
             Topic::Fractions => "Fractions",
             Topic::Percentages => "Percentages",
+            Topic::Geometry => "Geometry",
         }
     }
 
@@ -65,6 +69,7 @@ impl Topic {
             Topic::Units => "Units",
             Topic::Fractions => "Fractions",
             Topic::Percentages => "Percents",
+            Topic::Geometry => "Geometry",
         }
     }
 

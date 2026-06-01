@@ -11,6 +11,7 @@
 //! matter of adding a variant and letting the compiler point at every hole.
 
 use crate::fraction::{FractionProblem, Mode};
+use crate::geometry::GeometryProblem;
 use crate::problem::Problem;
 use crate::topic::Topic;
 use crate::units::UnitProblem;
@@ -24,6 +25,8 @@ pub enum Active {
     /// A visual shape problem — fractions and percentages share one type,
     /// distinguished by its [`Mode`].
     Shape(FractionProblem),
+    /// A geometry problem — perimeter, area, or volume of an outlined shape.
+    Geo(GeometryProblem),
 }
 
 impl Active {
@@ -37,6 +40,7 @@ impl Active {
                 Mode::Fraction => Topic::Fractions,
                 Mode::Percent => Topic::Percentages,
             },
+            Active::Geo(_) => Topic::Geometry,
         }
     }
 
@@ -51,6 +55,7 @@ impl Active {
                 }
                 Mode::Percent => input.parse::<i64>().ok().is_some_and(|v| s.is_percent_correct(v)),
             },
+            Active::Geo(g) => crate::geometry::parse(input).is_some_and(|v| g.is_correct(v)),
         }
     }
 
@@ -65,6 +70,7 @@ impl Active {
                 Mode::Fraction => format!("{}/{}", s.shaded, s.total),
                 Mode::Percent => s.percent_answer().to_string(),
             },
+            Active::Geo(g) => g.answer.to_string(),
         }
     }
 

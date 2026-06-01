@@ -440,6 +440,109 @@ fn title_screens_feature_deduction_duck() {
     }
 }
 
+#[test]
+fn geometry_answers_match_their_formulas() {
+    use crate::geometry::{self, GeoShape, Measure};
+    let mut rng = rand::thread_rng();
+    for _ in 0..3000 {
+        let g = geometry::generate(&mut rng);
+        let expected = match (g.measure, g.shape) {
+            (Measure::Perimeter, GeoShape::Rect { w, h }) => 2 * (w + h),
+            (Measure::Area, GeoShape::Rect { w, h }) => w * h,
+            (Measure::Perimeter, GeoShape::Triangle { sides: Some([a, b, c]), .. }) => a + b + c,
+            (Measure::Area, GeoShape::Triangle { base, height, sides: None }) => base * height / 2,
+            // Circles are answered as a coefficient of π: C = 2r·π, A = r²·π.
+            (Measure::Perimeter, GeoShape::Circle { r }) => 2 * r,
+            (Measure::Area, GeoShape::Circle { r }) => r * r,
+            (Measure::Volume, GeoShape::Box3 { l, w, h }) => l * w * h,
+            other => panic!("unexpected shape/measure combo: {other:?}"),
+        };
+        assert_eq!(g.answer, expected, "{:?} of {:?}", g.measure, g.shape);
+        assert!(g.answer > 0, "answers are positive whole numbers");
+        // A triangle area must come out whole (even base × height).
+        if let (Measure::Area, GeoShape::Triangle { base, height, sides: None }) = (g.measure, g.shape) {
+            assert_eq!((base * height) % 2, 0, "triangle area must be a whole number");
+        }
+        // Only circles are answered in terms of π.
+        assert_eq!(g.pi, matches!(g.shape, GeoShape::Circle { .. }));
+        // The unit matches the measure.
+        let want_unit = match g.measure {
+            Measure::Perimeter => "cm",
+            Measure::Area => "cm²",
+            Measure::Volume => "cm³",
+        };
+        assert_eq!(g.unit, want_unit);
+    }
+}
+
+#[test]
+fn geometry_mixes_into_a_session_and_records() {
+    let mut app = App::new(Config::default());
+    app.roster = crate::student::Roster::default();
+    app.menu_ops = [false, false, false, false];
+    app.menu_geometry = true;
+    app.start_session(false);
+    app.set_area(Rect::new(0, 0, 80, 24));
+    assert_eq!(app.current_topic(), crate::topic::Topic::Geometry);
+
+    app.input = app.current.correct_answer_string();
+    app.check_answer();
+    assert_eq!(app.feedback, Feedback::Correct);
+    assert_eq!(app.roster.current().solved_for(crate::topic::Topic::Geometry), 1);
+    assert!(app.transition.is_some(), "a correct answer starts a transition");
+}
+
+#[test]
+fn geometry_card_draws_hollow_shapes() {
+    use crate::geometry::{GeoShape, GeometryProblem, Measure};
+    let area = Rect::new(0, 0, 54, 20);
+    let render = |p: &GeometryProblem| {
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::ui::render_geometry_card(area, &mut buf, p, "", None);
+        buffer_to_string(&buf)
+    };
+
+    // Rectangle: a hollow box outline with its dimensions labelled.
+    let rect = render(&GeometryProblem { measure: Measure::Area, shape: GeoShape::Rect { w: 8, h: 5 }, answer: 40, unit: "cm²", pi: false, hint: vec![] });
+    assert!(rect.contains("Geometry") && rect.contains('┌') && rect.contains('┐'));
+    assert!(rect.contains('8') && rect.contains('5'), "rectangle dimensions are labelled");
+
+    // Triangle: contiguous / \ slopes and a base/height label line.
+    let tri = render(&GeometryProblem { measure: Measure::Area, shape: GeoShape::Triangle { base: 6, height: 4, sides: None }, answer: 12, unit: "cm²", pi: false, hint: vec![] });
+    assert!(tri.contains('/') && tri.contains('\\') && tri.contains("base 6 cm"));
+
+    // Circle: an outline labelled with its radius, answered in terms of π.
+    let circ = render(&GeometryProblem { measure: Measure::Area, shape: GeoShape::Circle { r: 6 }, answer: 36, unit: "cm²", pi: true, hint: vec![] });
+    assert!(circ.contains("radius 6 cm") && circ.contains("π"), "circle shows its radius and π");
+
+    // Box: a wireframe cuboid with its dimensions labelled.
+    let bx = render(&GeometryProblem { measure: Measure::Volume, shape: GeoShape::Box3 { l: 4, w: 3, h: 5 }, answer: 60, unit: "cm³", pi: false, hint: vec![] });
+    assert!(bx.contains('╱') && bx.contains('┌'), "box draws a wireframe cuboid");
+}
+
+#[test]
+fn geometry_shapes_render_safely_at_any_size() {
+    use crate::geometry::{GeoShape, GeometryProblem, Measure};
+    let shapes = [
+        GeoShape::Rect { w: 15, h: 12 },
+        GeoShape::Rect { w: 2, h: 2 },
+        GeoShape::Triangle { base: 14, height: 3, sides: None },
+        GeoShape::Triangle { base: 7, height: 0, sides: Some([5, 6, 7]) },
+        GeoShape::Circle { r: 9 },
+        GeoShape::Circle { r: 2 },
+        GeoShape::Box3 { l: 8, w: 8, h: 8 },
+        GeoShape::Box3 { l: 2, w: 2, h: 2 },
+    ];
+    for shape in shapes {
+        let p = GeometryProblem { measure: Measure::Area, shape, answer: 1, unit: "cm²", pi: false, hint: vec![] };
+        for (w, h) in [(18u16, 8u16), (24, 10), (40, 14), (80, 24), (120, 40)] {
+            let area = Rect::new(0, 0, w, h);
+            let mut buf = ratatui::buffer::Buffer::empty(area);
+            crate::ui::render_geometry_card(area, &mut buf, &p, "42", None);
+        }
+    }
+}
+
 fn sky_scene(name: &str) -> crate::cinematic::Scene {
     use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
     Scene {

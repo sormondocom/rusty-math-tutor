@@ -31,6 +31,9 @@ pub struct Student {
     /// Percentage problems solved.
     #[serde(default)]
     pub percents_solved: u32,
+    /// Geometry problems solved.
+    #[serde(default)]
+    pub geometry_solved: u32,
     /// The student's personal best run of correct answers in a row.
     #[serde(default)]
     pub best_streak: u32,
@@ -48,6 +51,7 @@ impl Student {
             units_solved: 0,
             fractions_solved: 0,
             percents_solved: 0,
+            geometry_solved: 0,
             best_streak: 0,
             reveal_lock: default_reveal_lock(),
         }
@@ -60,7 +64,7 @@ impl Student {
 
     /// Every kind of problem solved — across all topics.
     pub fn grand_total(&self) -> u32 {
-        self.total() + self.units_solved + self.fractions_solved + self.percents_solved
+        self.total() + self.units_solved + self.fractions_solved + self.percents_solved + self.geometry_solved
     }
 
     /// How many problems this student has solved for a given [`Topic`].
@@ -73,6 +77,7 @@ impl Student {
             Topic::Units => self.units_solved,
             Topic::Fractions => self.fractions_solved,
             Topic::Percentages => self.percents_solved,
+            Topic::Geometry => self.geometry_solved,
         }
     }
 
@@ -83,6 +88,7 @@ impl Student {
             Topic::Units => self.units_solved += 1,
             Topic::Fractions => self.fractions_solved += 1,
             Topic::Percentages => self.percents_solved += 1,
+            Topic::Geometry => self.geometry_solved += 1,
         }
     }
 
@@ -93,6 +99,7 @@ impl Student {
             Topic::Units => self.units_solved = 0,
             Topic::Fractions => self.fractions_solved = 0,
             Topic::Percentages => self.percents_solved = 0,
+            Topic::Geometry => self.geometry_solved = 0,
         }
     }
 
@@ -107,6 +114,7 @@ impl Student {
         self.units_solved = 0;
         self.fractions_solved = 0;
         self.percents_solved = 0;
+        self.geometry_solved = 0;
         self.best_streak = 0;
     }
 }

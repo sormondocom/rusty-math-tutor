@@ -15,6 +15,7 @@ mod config;
 mod duck;
 mod font;
 mod fraction;
+mod geometry;
 mod motivation;
 mod problem;
 mod section;

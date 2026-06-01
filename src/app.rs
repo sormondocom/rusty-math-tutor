@@ -23,7 +23,7 @@ const CHALLENGE_LEN: Duration = Duration::from_secs(60);
 /// Maximum digits a student can type for an answer.
 const MAX_INPUT: usize = 7;
 /// Number of selectable rows on the menu.
-const MENU_ITEMS: usize = 16;
+const MENU_ITEMS: usize = 17;
 /// Ticks per shape region while a fraction shape materialises.
 const FRAC_MAT_PER_REGION: u32 = 6;
 /// Editable fields on the Experimentation explorer.
@@ -67,13 +67,14 @@ const MI_OPS: std::ops::RangeInclusive<usize> = 2..=5;
 const MI_UNITS: usize = 6;
 const MI_FRACTIONS: usize = 7;
 const MI_PERCENTS: usize = 8;
-const MI_LAYOUT: usize = 9;
-const MI_SETTINGS: usize = 10;
-const MI_PROGRESS: usize = 11;
-const MI_TEACHER: usize = 12;
-const MI_PRACTICE: usize = 13;
-const MI_CHALLENGE: usize = 14;
-const MI_EXPERIMENT: usize = 15;
+const MI_GEOMETRY: usize = 9;
+const MI_LAYOUT: usize = 10;
+const MI_SETTINGS: usize = 11;
+const MI_PROGRESS: usize = 12;
+const MI_TEACHER: usize = 13;
+const MI_PRACTICE: usize = 14;
+const MI_CHALLENGE: usize = 15;
+const MI_EXPERIMENT: usize = 16;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Feedback {
@@ -152,6 +153,8 @@ pub struct App {
     pub menu_fractions: bool,
     /// Whether percentage problems are mixed into the session.
     pub menu_percents: bool,
+    /// Whether geometry problems are mixed into the session.
+    pub menu_geometry: bool,
     pub menu_index: usize,
 
     // Startup graphics-mode picker.
@@ -175,6 +178,7 @@ pub struct App {
     units_enabled: bool,
     fractions_enabled: bool,
     percents_enabled: bool,
+    geometry_enabled: bool,
 
     // Experimentation — free-form unit explorer.
     pub exp_category: usize,
@@ -272,6 +276,7 @@ impl App {
             menu_units: false,
             menu_fractions: false,
             menu_percents: false,
+            menu_geometry: false,
             menu_index: 0,
             startup_index,
             settings_grade: 1,
@@ -282,6 +287,7 @@ impl App {
             units_enabled: false,
             fractions_enabled: false,
             percents_enabled: false,
+            geometry_enabled: false,
             // Defaults primed for a fun "8000 gallons -> teaspoons" experiment.
             exp_category: 0,
             exp_amount: "8000".to_string(),
@@ -514,6 +520,7 @@ impl App {
                 MI_UNITS => self.menu_units = !self.menu_units,
                 MI_FRACTIONS => self.menu_fractions = !self.menu_fractions,
                 MI_PERCENTS => self.menu_percents = !self.menu_percents,
+                MI_GEOMETRY => self.menu_geometry = !self.menu_geometry,
                 MI_PRACTICE => self.start_session(false),
                 MI_CHALLENGE => self.start_session(true),
                 MI_EXPERIMENT => self.screen = Screen::Experiment,
@@ -924,8 +931,9 @@ impl App {
         self.units_enabled = self.menu_units;
         self.fractions_enabled = self.menu_fractions;
         self.percents_enabled = self.menu_percents;
+        self.geometry_enabled = self.menu_geometry;
         // Need at least one problem type — fall back to addition.
-        if self.ops.is_empty() && !self.units_enabled && !self.fractions_enabled && !self.percents_enabled {
+        if self.ops.is_empty() && !self.units_enabled && !self.fractions_enabled && !self.percents_enabled && !self.geometry_enabled {
             self.ops.push(Op::Add);
         }
         self.screen = if challenge { Screen::Challenge } else { Screen::Practice };
@@ -1034,7 +1042,8 @@ impl App {
     /// Generate the next problem, randomly choosing a section from the enabled
     /// mix (arithmetic, units, fractions, percentages).
     fn generate_pending(&mut self) {
-        // Kinds: 0 = arithmetic, 1 = units, 2 = fractions, 3 = percentages.
+        // Kinds: 0 = arithmetic, 1 = units, 2 = fractions, 3 = percentages,
+        // 4 = geometry.
         let mut kinds: Vec<u8> = Vec::new();
         if !self.ops.is_empty() {
             kinds.push(0);
@@ -1048,6 +1057,9 @@ impl App {
         if self.percents_enabled {
             kinds.push(3);
         }
+        if self.geometry_enabled {
+            kinds.push(4);
+        }
         if kinds.is_empty() {
             kinds.push(0);
         }
@@ -1056,6 +1068,7 @@ impl App {
             1 => Active::Unit(crate::units::generate(self.config.locality, &mut self.rng)),
             2 => Active::Shape(crate::fraction::generate(&mut self.rng)),
             3 => Active::Shape(crate::fraction::generate_percent(&mut self.rng)),
+            4 => Active::Geo(crate::geometry::generate(&mut self.rng)),
             _ => Active::Arith(problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng)),
         });
     }
@@ -1089,6 +1102,7 @@ impl App {
         match active {
             Active::Shape(s) => ui::render_shape_card(area, buf, s, input, progress, banner),
             Active::Unit(u) => ui::render_unit_card(area, buf, u, input, banner),
+            Active::Geo(g) => ui::render_geometry_card(area, buf, g, input, banner),
             Active::Arith(p) => ui::render_card(area, buf, p, input, self.config.layout, banner),
         }
     }

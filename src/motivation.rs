@@ -141,6 +141,25 @@ const FRACTIONS: &[&str] = &[
     "Measuring a half-cup of flour with a one-third scoop",
 ];
 
+const GEOMETRY: &[&str] = &[
+    "Working out how much carpet covers a bedroom floor (area)",
+    "Buying the right length of fence for a backyard (perimeter)",
+    "Filling a fish tank with the right amount of water (volume)",
+    "Cutting wrapping paper to fit a present's surface",
+    "Measuring trim to run around a window frame",
+    "Figuring out how much paint covers a wall",
+    "Packing boxes so they fill a moving truck efficiently",
+    "Designing a soccer field with the right dimensions",
+    "Sizing a rug so it fits a living room",
+    "Working out how much soil fills a raised garden bed",
+    "Planning tiles to cover a kitchen backsplash",
+    "Estimating concrete to pour a rectangular patio",
+    "Knowing how much ribbon goes around a gift box",
+    "Calculating storage space inside a closet",
+    "Laying out a running track's distance around the oval",
+    "Building a sandbox and filling it with the right sand",
+];
+
 const PERCENTAGES: &[&str] = &[
     "Working out how much you save with 25% off at a sale",
     "Reading a phone battery that says it's 80% charged",
@@ -240,6 +259,17 @@ const PERCENTAGES_CODE: &[CodeNote] = &[
     },
 ];
 
+const GEOMETRY_CODE: &[CodeNote] = &[
+    CodeNote {
+        code: "let area = w * h;",
+        why: "Multiplying width by height is how a rectangle's whole inside is counted.",
+    },
+    CodeNote {
+        code: "let volume = l * w * h;",
+        why: "Stacking area through a depth — three multiplications — fills a box with space.",
+    },
+];
+
 fn code_notes(topic: Topic) -> &'static [CodeNote] {
     match topic {
         Topic::Add => ADD_CODE,
@@ -249,6 +279,7 @@ fn code_notes(topic: Topic) -> &'static [CodeNote] {
         Topic::Units => UNITS_CODE,
         Topic::Fractions => FRACTIONS_CODE,
         Topic::Percentages => PERCENTAGES_CODE,
+        Topic::Geometry => GEOMETRY_CODE,
     }
 }
 
@@ -266,6 +297,7 @@ fn applications(topic: Topic) -> &'static [&'static str] {
         Topic::Units => UNITS,
         Topic::Fractions => FRACTIONS,
         Topic::Percentages => PERCENTAGES,
+        Topic::Geometry => GEOMETRY,
     }
 }
 
@@ -305,6 +337,8 @@ pub struct Extras {
     fractions: Vec<String>,
     #[serde(default)]
     percentages: Vec<String>,
+    #[serde(default)]
+    geometry: Vec<String>,
 }
 
 impl Extras {
@@ -334,6 +368,7 @@ impl Extras {
             Topic::Units => &self.units,
             Topic::Fractions => &self.fractions,
             Topic::Percentages => &self.percentages,
+            Topic::Geometry => &self.geometry,
         }
     }
 
@@ -351,6 +386,7 @@ impl Extras {
             Topic::Units => &mut self.units,
             Topic::Fractions => &mut self.fractions,
             Topic::Percentages => &mut self.percentages,
+            Topic::Geometry => &mut self.geometry,
         }
     }
 
