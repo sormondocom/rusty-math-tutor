@@ -85,3 +85,18 @@ const STRUGGLE: &[&str] = &[
 pub fn struggle_message(rng: &mut impl Rng) -> String {
     STRUGGLE.choose(rng).unwrap().to_string()
 }
+
+/// Clever, kind reprimands when a student keeps asking for the answer after the
+/// peek limit.  They escalate gently — `index` is clamped to the last one.
+const REPRIMANDS: &[&str] = &[
+    "A garden won't grow unwatered — and your mind is the garden!",
+    "Your brain's a muscle: it only grows when YOU lift it.",
+    "The answer tastes sweeter when YOU find it. Have a go!",
+    "Peeking won't make it stick — give it a real try!",
+    "Even I had to practise, feather by feather. You've got this!",
+    "No more peeks for now — I believe in your clever brain!",
+];
+
+pub fn peek_reprimand(index: usize) -> String {
+    REPRIMANDS[index.min(REPRIMANDS.len() - 1)].to_string()
+}

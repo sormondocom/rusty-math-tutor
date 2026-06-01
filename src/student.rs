@@ -10,31 +10,90 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::problem::Op;
+use crate::topic::Topic;
+
+fn default_reveal_lock() -> u32 {
+    3
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Student {
     pub name: String,
-    /// Problems solved, indexed by [`Op::index`].
+    /// Arithmetic problems solved, indexed by [`Topic::index`] (Add..Div = 0..3).
     #[serde(default)]
     pub solved: [u32; 4],
+    /// Measurement (Units of Measure) problems solved.
+    #[serde(default)]
+    pub units_solved: u32,
+    /// Fraction problems solved.
+    #[serde(default)]
+    pub fractions_solved: u32,
+    /// Percentage problems solved.
+    #[serde(default)]
+    pub percents_solved: u32,
     /// The student's personal best run of correct answers in a row.
     #[serde(default)]
     pub best_streak: u32,
+    /// How many answer reveals before the duck puts a peek on cooldown.
+    /// `0` means reveals are never locked.  Set by the teacher per student.
+    #[serde(default = "default_reveal_lock")]
+    pub reveal_lock: u32,
 }
 
 impl Student {
     pub fn new(name: &str) -> Self {
-        Student { name: name.to_string(), solved: [0; 4], best_streak: 0 }
+        Student {
+            name: name.to_string(),
+            solved: [0; 4],
+            units_solved: 0,
+            fractions_solved: 0,
+            percents_solved: 0,
+            best_streak: 0,
+            reveal_lock: default_reveal_lock(),
+        }
     }
 
+    /// Arithmetic problems solved (sum of the four operations).
     pub fn total(&self) -> u32 {
         self.solved.iter().sum()
     }
 
-    /// Record one correct answer for `op`.
-    pub fn record(&mut self, op: Op) {
-        self.solved[op.index()] += 1;
+    /// Every kind of problem solved — across all topics.
+    pub fn grand_total(&self) -> u32 {
+        self.total() + self.units_solved + self.fractions_solved + self.percents_solved
+    }
+
+    /// How many problems this student has solved for a given [`Topic`].
+    pub fn solved_for(&self, topic: Topic) -> u32 {
+        match topic {
+            Topic::Add => self.solved[0],
+            Topic::Sub => self.solved[1],
+            Topic::Mul => self.solved[2],
+            Topic::Div => self.solved[3],
+            Topic::Units => self.units_solved,
+            Topic::Fractions => self.fractions_solved,
+            Topic::Percentages => self.percents_solved,
+        }
+    }
+
+    /// Record one correct answer for `topic`.
+    pub fn record_topic(&mut self, topic: Topic) {
+        match topic {
+            Topic::Add | Topic::Sub | Topic::Mul | Topic::Div => self.solved[topic.index()] += 1,
+            Topic::Units => self.units_solved += 1,
+            Topic::Fractions => self.fractions_solved += 1,
+            Topic::Percentages => self.percents_solved += 1,
+        }
+    }
+
+    /// Zero just one topic's count (teacher records admin).
+    pub fn reset_topic(&mut self, topic: Topic) {
+        match topic {
+            Topic::Add | Topic::Sub | Topic::Mul | Topic::Div => self.solved[topic.index()] = 0,
+            Topic::Units => self.units_solved = 0,
+            Topic::Fractions => self.fractions_solved = 0,
+            Topic::Percentages => self.percents_solved = 0,
+        }
     }
 
     /// Note a streak, keeping only the personal best.
@@ -45,6 +104,9 @@ impl Student {
     /// Wipe all progress back to zero (teacher records admin).
     pub fn reset(&mut self) {
         self.solved = [0; 4];
+        self.units_solved = 0;
+        self.fractions_solved = 0;
+        self.percents_solved = 0;
         self.best_streak = 0;
     }
 }

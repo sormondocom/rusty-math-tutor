@@ -17,6 +17,7 @@ use crate::config::Layout;
 use crate::duck::Pose;
 use crate::font;
 use crate::problem::{Op, Problem};
+use crate::section::Active;
 use crate::strategy::{Strategy, Viz};
 use crate::units::{Theme, UnitProblem};
 use crate::{duck, problem, strategy};
@@ -268,6 +269,83 @@ fn experiment_reaction(cat: crate::units::Category, base_value: f64) -> ExpReact
     ExpReaction::None
 }
 
+// ---------------------------------------------------------------------------
+// Fractions — a shape that materialises, with a typed a/b answer
+// ---------------------------------------------------------------------------
+
+/// Draw a fraction problem: the question up top, the materialising shape in the
+/// middle, and the student's stacked `a/b` answer beneath.
+/// A visual shape card, shared by the Fractions and Percentages sections.  The
+/// figure and question come from the problem; the answer area and footer adapt
+/// to its [`Mode`] — a stacked `a/b` for fractions, a single `n%` for percents.
+pub fn render_shape_card(area: Rect, buf: &mut Buffer, p: &crate::fraction::FractionProblem, input: &str, progress: f32, banner: Option<(String, Color)>) {
+    use crate::fraction::Mode;
+    let title = match p.mode {
+        Mode::Fraction => " Fractions ",
+        Mode::Percent => " Percentages ",
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(p.shaded_color))
+        .title(title)
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    // Question.
+    let q = p.question();
+    let mut y = inner.top() + 1;
+    for line in wrap_text(&q, inner.width.saturating_sub(4)).iter().take(2) {
+        put_str(buf, center(inner, line.chars().count() as u16), y, line, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        y += 1;
+    }
+
+    // The materialising shape occupies the middle band.
+    let answer_h = 5; // "Your answer:" + the (stacked or inline) answer
+    let shape_area = Rect {
+        x: inner.left() + 2,
+        y: y + 1,
+        width: inner.width.saturating_sub(4),
+        height: inner.bottom().saturating_sub(y + 1 + answer_h + 2),
+    };
+    if shape_area.height >= 3 {
+        crate::shapes::render(buf, shape_area, p.shape, progress, |i| p.color_of(i));
+    }
+
+    let ay = inner.bottom().saturating_sub(answer_h + 1);
+    put_str(buf, center(inner, 12), ay, "Your answer:", Style::default().fg(Color::Gray));
+    let style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+    match p.mode {
+        Mode::Fraction => {
+            // Stacked as a fraction: numerator over a bar over the denominator.
+            let (num, den) = match input.split_once('/') {
+                Some((a, b)) => (if a.is_empty() { "?" } else { a }, if b.is_empty() { "?" } else { b }),
+                None => (if input.is_empty() { "?" } else { input }, "?"),
+            };
+            let bar_w = num.chars().count().max(den.chars().count()).max(1) as u16 + 2;
+            put_str(buf, center(inner, num.chars().count() as u16), ay + 1, num, style);
+            put_str(buf, center(inner, bar_w), ay + 2, &"─".repeat(bar_w as usize), Style::default().fg(p.shaded_color));
+            put_str(buf, center(inner, den.chars().count() as u16), ay + 3, den, style);
+        }
+        Mode::Percent => {
+            // A single whole number with a percent sign.
+            let shown = if input.is_empty() { "?".to_string() } else { format!("{}%", input) };
+            put_str(buf, center(inner, shown.chars().count() as u16), ay + 2, &shown, style);
+        }
+    }
+
+    if let Some((text, color)) = banner {
+        put_str(buf, center(inner, text.chars().count() as u16), ay + 4, &text, Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
+
+    let hints = match p.mode {
+        Mode::Fraction => "Type like 2/4    Enter check    H help duck    Esc menu",
+        Mode::Percent => "Type a number like 25    Enter check    H help duck    Esc menu",
+    };
+    put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1), hints, Style::default().fg(Color::DarkGray));
+}
+
 fn draw_experiment(f: &mut Frame, app: &App, area: Rect) {
     use crate::units::{self, Category};
 
@@ -417,44 +495,46 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     font::draw_text(buf, center(area, font::text_width(title)), area.top() + 1, title, Style::default().fg(Color::LightCyan));
     put_str(buf, center(area, 17), area.top() + 6, "RUSTY MATH TUTOR", Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
 
-    let mut y = area.top() + 8;
     let col = area.left() + area.width.saturating_sub(42) / 2;
     let sel = app.menu_index;
 
-    // Student selector.
-    draw_menu_row(buf, col, y, sel == 0, &format!("Student:  < {} >", app.roster.current().name), "(<>  N: add new)");
-    y += 2;
-
-    // Grade.
-    draw_menu_row(buf, col, y, sel == 1, &format!("Grade level:  < {} >", grade_name(app.menu_grade)), "(Left / Right)");
-    y += 2;
-
-    // Operation toggles (rows 2..=5).
+    // The menu as a flat list of (label, hint) — one line each, so it can be
+    // windowed when the terminal is short.
+    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+    let mut items: Vec<(String, &str)> = vec![
+        (format!("Student:  < {} >", app.roster.current().name), "(<>  N: add new)"),
+        (format!("Grade level:  < {} >", grade_name(app.menu_grade)), "(Left / Right)"),
+    ];
     for (i, op) in problem::Op::ALL.iter().enumerate() {
-        let mark = if app.menu_ops[i] { "[x]" } else { "[ ]" };
-        draw_menu_row(buf, col, y, sel == 2 + i, &format!("{} {}", mark, op.name()), "(Enter toggles)");
+        items.push((format!("{} {}", mark(app.menu_ops[i]), op.name()), "(Enter toggles)"));
+    }
+    items.push((format!("{} Units of Measure", mark(app.menu_units)), "(measuring problems)"));
+    items.push((format!("{} Fractions", mark(app.menu_fractions)), "(shapes & pieces)"));
+    items.push((format!("{} Percentages", mark(app.menu_percents)), "(shapes out of 100)"));
+    items.push((format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)"));
+    items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
+    items.push(("My Progress...".to_string(), "(Enter to view)"));
+    items.push(("Teacher Area...".to_string(), "(password)"));
+    items.push(("▶  Start Practice".to_string(), "(no timer)"));
+    items.push(("▶  Start Challenge".to_string(), "(60-second timer)"));
+    items.push(("▶  Experimentation".to_string(), "(explore unit conversions)"));
+
+    // Scroll the window so the selected item stays visible.
+    let (scroll, visible) = scroll_window(items.len(), sel, area.top() + 8, area.bottom().saturating_sub(2));
+    let list_top = area.top() + 8;
+    let mut y = list_top;
+    for (idx, (label, hint)) in items.iter().enumerate().skip(scroll).take(visible) {
+        draw_menu_row(buf, col, y, idx == sel, label, hint);
         y += 1;
     }
-    let units_mark = if app.menu_units { "[x]" } else { "[ ]" };
-    draw_menu_row(buf, col, y, sel == 6, &format!("{} Units of Measure", units_mark), "(measuring problems)");
-    y += 2;
+    if scroll > 0 {
+        put_str(buf, area.right().saturating_sub(9), list_top, "↑ more", Style::default().fg(Color::LightCyan));
+    }
+    if scroll + visible < items.len() {
+        put_str(buf, area.right().saturating_sub(9), y.saturating_sub(1), "↓ more", Style::default().fg(Color::LightCyan));
+    }
 
-    draw_menu_row(buf, col, y, sel == 7, &format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 8, "Settings (number ranges)...", "(Enter to open)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 9, "My Progress...", "(Enter to view)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 10, "Teacher Area...", "(password)");
-    y += 2;
-
-    draw_menu_row(buf, col, y, sel == 11, "▶  Start Practice", "(no timer)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 12, "▶  Start Challenge", "(60-second timer)");
-    y += 1;
-    draw_menu_row(buf, col, y, sel == 13, "▶  Experimentation", "(explore unit conversions)");
-
-    put_str(buf, col, area.bottom().saturating_sub(2), "Up / Down to move    N: add student    Q: quit", Style::default().fg(Color::DarkGray));
+    put_str(buf, col, area.bottom().saturating_sub(1), "Up / Down to move    N: add student    Q: quit", Style::default().fg(Color::DarkGray));
 
     // Deduction Duck wanders by every so often.
     draw_menu_duck(buf, area, app.anim_frame);
@@ -576,25 +656,26 @@ fn grade_name(grade: u8) -> String {
 fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
     let s = app.roster.current();
-    let total = s.total();
+    let total = s.grand_total();
     let col = area.left() + area.width.saturating_sub(46) / 2;
 
     put_str(buf, col, area.top() + 2, format!("{}'s Math Journey", s.name), Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
 
-    // Big celebratory total.
+    // Big celebratory total — every kind of problem counts.
     let total_str = total.to_string();
     font::draw_text(buf, center(area, font::text_width(&total_str)), area.top() + 4, &total_str, Style::default().fg(Color::LightGreen));
     put_str(buf, center(area, 20), area.top() + 10, "problems solved!", Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
 
-    // Per-operation breakdown with friendly bars.
+    // Breakdown with friendly bars across every section (one per Topic).
+    let rows: Vec<(&str, u32)> =
+        crate::topic::Topic::ALL.iter().map(|&t| (t.short(), s.solved_for(t))).collect();
+    let max = rows.iter().map(|(_, n)| *n).max().unwrap_or(0).max(1);
     let mut y = area.top() + 12;
-    let max = s.solved.iter().copied().max().unwrap_or(0).max(1);
-    for op in problem::Op::ALL {
-        let n = s.solved[op.index()];
+    for (label, n) in rows {
         let bar_w = 24u16;
         let filled = ((n as f32 / max as f32) * bar_w as f32).round() as u16;
         let bar: String = (0..bar_w).map(|i| if i < filled { '█' } else { '░' }).collect();
-        put_str(buf, col, y, format!("{:<10} ", op.name()), Style::default().fg(Color::White));
+        put_str(buf, col, y, format!("{:<10} ", label), Style::default().fg(Color::White));
         put_str(buf, col + 11, y, &bar, Style::default().fg(Color::LightGreen));
         put_str(buf, col + 11 + bar_w + 1, y, format!("{}", n), Style::default().fg(Color::LightYellow));
         y += 1;
@@ -693,8 +774,8 @@ fn draw_teacher_manage(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
-    let op = problem::Op::ALL[app.teacher_op];
-    put_str(buf, col, area.top() + 3, format!("Operation:  < {} >", op.name()), Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    let topic = crate::topic::Topic::ALL[app.teacher_topic];
+    put_str(buf, col, area.top() + 3, format!("Section:  < {} >", topic.name()), Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
     put_str(buf, col, area.top() + 4, "Your own real-life examples shown in the Why? panel:", Style::default().fg(Color::Gray));
 
     // When adding, a wrapping input box claims the lower part of the screen.
@@ -708,7 +789,7 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
     };
     let list_bottom = input_box.map_or(area.bottom().saturating_sub(2), |b| b.y.saturating_sub(1));
 
-    let items = app.why_extras.items(op);
+    let items = app.why_extras.items(topic);
     let mut y = area.top() + 6;
     if items.is_empty() {
         put_str(buf, col + 2, y, "(none yet — press A to add one)", Style::default().fg(Color::DarkGray));
@@ -748,50 +829,75 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         let count = format!("{}/{}", app.teacher_text.chars().count(), crate::app::ANECDOTE_MAX);
         put_str(buf, area.right().saturating_sub(count.len() as u16 + 1), foot_y, &count, Style::default().fg(Color::Gray));
     } else {
-        put_str(buf, col, area.bottom().saturating_sub(2), "< > operation    A: add    Tab: records    Esc: log out", Style::default().fg(Color::DarkGray));
+        put_str(buf, col, area.bottom().saturating_sub(2), "< > section    A: add    Tab: records    Esc: log out", Style::default().fg(Color::DarkGray));
     }
 }
 
 fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
-    let sel_op = app.teacher_op;
-    // Column header.
-    let header = format!("{:<14}{:>6}{:>6}{:>6}{:>6}{:>8}", "Student", "Add", "Sub", "Mul", "Div", "Total");
+    let sel_topic = app.teacher_topic;
+    // Column header (the last column is each student's reveal limit).
+    let header = format!("{:<14}{:>6}{:>6}{:>6}{:>6}{:>7}{:>7}", "Student", "Add", "Sub", "Mul", "Div", "Total", "Lock");
     put_str(buf, col, area.top() + 3, &header, Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD));
 
-    let mut y = area.top() + 4;
-    for (i, s) in app.roster.students.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(4) {
-            break;
-        }
+    let list_top = area.top() + 4;
+    let (scroll, visible) = scroll_window(app.roster.students.len(), app.teacher_rec_index, list_top, area.bottom().saturating_sub(5));
+    let mut y = list_top;
+    for (i, s) in app.roster.students.iter().enumerate().skip(scroll).take(visible) {
         let selected = i == app.teacher_rec_index;
         let base = if selected {
             Style::default().fg(Color::Black).bg(Color::LightCyan).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
+        let lock = if s.reveal_lock == 0 { "off".to_string() } else { s.reveal_lock.to_string() };
         let row = format!(
-            "{:<14}{:>6}{:>6}{:>6}{:>6}{:>8}",
+            "{:<14}{:>6}{:>6}{:>6}{:>6}{:>7}{:>7}",
             clip(&s.name, 14),
             s.solved[0],
             s.solved[1],
             s.solved[2],
             s.solved[3],
-            s.total()
+            s.grand_total(),
+            lock,
         );
         put_str(buf, col, y, &row, base);
-        // Mark the selected section column on the selected row.
-        if selected {
-            let mark_x = col + 14 + sel_op as u16 * 6;
+        // The table only has columns for the four arithmetic ops; mark the
+        // selected one there, otherwise note the section name above the table.
+        if selected && sel_topic < 4 {
+            let mark_x = col + 14 + sel_topic as u16 * 6;
             put_str(buf, mark_x, y.saturating_sub(1), "▼", Style::default().fg(Color::LightYellow));
         }
         y += 1;
     }
+    if scroll > 0 {
+        put_str(buf, col, list_top, "↑", Style::default().fg(Color::LightCyan));
+    }
+    if scroll + visible < app.roster.students.len() {
+        put_str(buf, col, y.saturating_sub(1), "↓", Style::default().fg(Color::LightCyan));
+    }
 
+    // Name the selected section (the table only shows columns for the four ops).
+    let topic = crate::topic::Topic::ALL[sel_topic];
+    let sel_student = &app.roster.students[app.teacher_rec_index.min(app.roster.students.len() - 1)];
+    put_str(
+        buf,
+        col,
+        area.bottom().saturating_sub(4),
+        format!("Section for S reset:  < {} >  = {}", topic.name(), sel_student.solved_for(topic)),
+        Style::default().fg(Color::LightYellow),
+    );
+    put_str(
+        buf,
+        col,
+        area.bottom().saturating_sub(3),
+        "Lock = answer peeks allowed before a cooldown (0 = never lock).",
+        Style::default().fg(Color::Gray),
+    );
     put_str(
         buf,
         col,
         area.bottom().saturating_sub(2),
-        "Up/Down student   < > section   S: reset section   R: reset all   X: remove   Esc: log out",
+        "Up/Down student   <> section   S/R reset   X remove   +/- lock   Esc out",
         Style::default().fg(Color::DarkGray),
     );
 }
@@ -866,65 +972,77 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
         draw_challenge_hud(f, app, hud);
     }
 
-    // Card: either an in-flight transition or the current problem (arithmetic
-    // or, when Units of Measure is checked, a measurement problem).
+    // Card: either an in-flight transition or the current problem, dispatched on
+    // whichever section produced it.
     if let Some(t) = &app.transition {
         t.render(card_area, f.buffer_mut());
     } else if app.challenge.as_ref().map_or(false, |c| c.finished) {
         draw_challenge_summary(f, app, card_area);
-    } else if app.current_is_unit {
-        let banner = match app.feedback {
-            Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
-            Feedback::Wrong => Some(("✗  Not quite — try again!".to_string(), Color::LightRed)),
-            Feedback::None => None,
-        };
-        let p = &app.unit_problem;
-        render_unit_card(card_area, f.buffer_mut(), p, &app.input, banner);
-        if p.duck_jump {
-            let inner = Block::default().borders(Borders::ALL).inner(card_area);
-            draw_duck_gag(f.buffer_mut(), inner, p.theme, app.anim_frame);
-        }
     } else {
-        let banner = feedback_banner(app);
-        render_card(card_area, f.buffer_mut(), &app.current, &app.input, app.config.layout, banner);
+        match &app.current {
+            Active::Shape(s) => {
+                let banner = match app.feedback {
+                    Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+                    Feedback::Wrong => Some(("✗  Not quite — count again!".to_string(), Color::LightRed)),
+                    Feedback::None => None,
+                };
+                render_shape_card(card_area, f.buffer_mut(), s, &app.input, app.frac_progress(), banner);
+            }
+            Active::Unit(p) => {
+                let banner = match app.feedback {
+                    Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+                    Feedback::Wrong => Some(("✗  Not quite — try again!".to_string(), Color::LightRed)),
+                    Feedback::None => None,
+                };
+                render_unit_card(card_area, f.buffer_mut(), p, &app.input, banner);
+                if p.duck_jump {
+                    let inner = Block::default().borders(Borders::ALL).inner(card_area);
+                    draw_duck_gag(f.buffer_mut(), inner, p.theme, app.anim_frame);
+                }
+            }
+            Active::Arith(p) => {
+                let banner = feedback_banner(app);
+                render_card(card_area, f.buffer_mut(), p, &app.input, app.config.layout, banner);
+            }
+        }
     }
 
-    // Deduction Duck helps with either kind of problem; the Why panel is
-    // arithmetic-only.
-    if app.transition.is_none() {
-        if app.current_is_unit {
-            if app.help_in > 0.0 {
-                draw_unit_help(f, app, card_area);
-            }
-        } else {
-            if app.help_in > 0.0 {
-                draw_help_overlay(f, app, card_area);
-            }
-            if app.why_active {
-                draw_why_overlay(f, app, card_area);
-            }
+    // Deduction Duck helps with any problem; the Why panel works for every topic.
+    if app.transition.is_none() && app.help_in > 0.0 {
+        match &app.current {
+            Active::Shape(s) => draw_hint_panel(f, app, card_area, &s.hint, s.answer_label()),
+            Active::Unit(u) => draw_hint_panel(f, app, card_area, &u.hint, format!("Answer: {} {}", u.answer, u.unit_label)),
+            Active::Arith(p) => draw_help_overlay(f, app, card_area, p),
         }
+    }
+    if app.transition.is_none() && app.why_active {
+        draw_why_overlay(f, app, card_area);
     }
 }
 
-/// Deduction Duck's hint panel for a measurement / money problem: a how-to
-/// hint (never the answer), with R to reveal the worked answer.
-fn draw_unit_help(f: &mut Frame, app: &App, area: Rect) {
-    let p = &app.unit_problem;
-
-    // Tagged lines: 0 plain, 1 answer, 2 encouragement, 3 header.
+/// Deduction Duck's hint panel: a how-to hint (never the answer) with R to
+/// reveal the worked `answer`.  Shared by measurement and fraction problems,
+/// and honours the encouragement, reprimand, and peek-cooldown state.
+fn draw_hint_panel(f: &mut Frame, app: &App, area: Rect, hint: &[String], answer: String) {
+    // Tagged lines: 0 plain, 1 answer, 2 encouragement, 3 header, 4 reprimand.
     let mut lines: Vec<(String, u8)> = Vec::new();
     if let Some(msg) = &app.encourage {
         lines.push((msg.clone(), 2));
         lines.push((String::new(), 0));
     }
+    if let Some(r) = &app.reprimand {
+        for l in wrap_text(r, 52) {
+            lines.push((l, 4));
+        }
+        lines.push((String::new(), 0));
+    }
     lines.push(("Deduction Duck's hint:".to_string(), 3));
-    for h in &p.hint {
+    for h in hint {
         lines.push((format!("• {}", h), 0));
     }
     if app.revealed {
         lines.push((String::new(), 0));
-        lines.push((format!("Answer: {} {}", p.answer, p.unit_label), 1));
+        lines.push((answer, 1));
     }
 
     let content_w = lines.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(20) as u16;
@@ -966,22 +1084,28 @@ fn draw_unit_help(f: &mut Frame, app: &App, area: Rect) {
             break;
         }
         let style = match tag {
-            1 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
-            2 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            1 | 2 => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
             3 => Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
+            4 => Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
             _ => Style::default().fg(Color::White),
         };
         put_str(buf, inner.left(), y, clip(line, text_w), style);
         y += 1;
     }
 
-    let footer = if app.revealed { "R: hide answer    H: shoo" } else { "R: show answer    H: shoo" };
+    let footer = if app.reveal_locked() {
+        "Answer's on cooldown — try it yourself!    H: shoo"
+    } else if app.revealed {
+        "R: hide answer    H: shoo"
+    } else {
+        "R: show answer    H: shoo"
+    };
     put_str(buf, inner.left(), inner.bottom().saturating_sub(1), footer, Style::default().fg(Color::Gray));
 }
 
-/// The Y overlay: a panel listing real-world uses of the current operation.
+/// The Y overlay: a panel listing real-world uses of the current topic.
 fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
-    let heading = crate::motivation::heading(app.current.op);
+    let heading = crate::motivation::heading(app.current_topic());
 
     // Each tagged line carries a style: 0 bullet, 1 code header, 2 code, 3 why.
     let panel_w = area.width.saturating_sub(4).min(72).max(24).min(area.width);
@@ -1032,7 +1156,7 @@ fn draw_why_overlay(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(panel);
     block.render(panel, buf);
 
-    put_str(buf, inner.left(), inner.top(), clip(heading, inner.width), Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
+    put_str(buf, inner.left(), inner.top(), clip(&heading, inner.width), Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
 
     // Visible content window: rows between the gap under the heading and the
     // footer.  Anything beyond scrolls, controlled by Up/Down.
@@ -1351,8 +1475,8 @@ fn draw_challenge_summary(f: &mut Frame, app: &App, area: Rect) {
 /// The duck's stage: a panel sliding up from the bottom in which he acts out
 /// the chosen strategy — walking a number line, smashing a number, or talking
 /// it through.  Hint steps show first; the answer appears only once revealed.
-fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
-    let strats = strategy::strategies(&app.current);
+fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect, problem: &Problem) {
+    let strats = strategy::strategies(problem);
     let idx = app.strategy_index % strats.len();
     let s = &strats[idx];
 
@@ -1384,8 +1508,12 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(panel);
     block.render(panel, buf);
 
-    // An encouraging word takes the top line when the student is struggling.
-    let enc_off: u16 = if let Some(msg) = &app.encourage {
+    // The top line carries a peek reprimand (red) or, failing that, an
+    // encouraging word (green) when the student is struggling.
+    let enc_off: u16 = if let Some(msg) = &app.reprimand {
+        put_str(buf, inner.left(), inner.top(), clip(msg, inner.width), Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD));
+        1
+    } else if let Some(msg) = &app.encourage {
         put_str(buf, inner.left(), inner.top(), clip(msg, inner.width), Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD));
         1
     } else {
@@ -1396,7 +1524,14 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
     let header = format!("Way {}/{}: {}", idx + 1, strats.len(), s.title);
     put_str(buf, inner.left(), inner.top() + enc_off, clip(&header, inner.width), Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD));
 
-    let mut controls = vec![if app.revealed { "R: hide answer" } else { "R: show answer" }.to_string()];
+    let reveal_ctl = if app.reveal_locked() {
+        "R: locked!"
+    } else if app.revealed {
+        "R: hide answer"
+    } else {
+        "R: show answer"
+    };
+    let mut controls = vec![reveal_ctl.to_string()];
     if strats.len() > 1 {
         controls.push("Space: another way".to_string());
     }
@@ -1415,7 +1550,7 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let accent = app.current.accent;
+    let accent = problem.accent;
     let drawn = match &s.viz {
         Viz::NumberLine { stops, hops } => draw_number_line(buf, content, s, stops, hops, app, accent),
         Viz::Smash { value, parts } => draw_smash(buf, content, s, *value, parts, app, accent),
@@ -1613,6 +1748,24 @@ fn center(area: Rect, width: u16) -> u16 {
     area.left() + area.width.saturating_sub(width) / 2
 }
 
+/// Compute a scroll window for a list of `total` one-line items shown between
+/// rows `top` and `bottom` (exclusive), keeping `sel` visible.  Returns
+/// `(first_visible_index, visible_count)`.
+fn scroll_window(total: usize, sel: usize, top: u16, bottom: u16) -> (usize, usize) {
+    let visible = bottom.saturating_sub(top) as usize;
+    if visible == 0 {
+        return (0, 0);
+    }
+    if total <= visible {
+        return (0, total);
+    }
+    let mut scroll = (sel + 1).saturating_sub(visible).min(total - visible);
+    if sel < scroll {
+        scroll = sel;
+    }
+    (scroll, visible)
+}
+
 /// Truncate `s` to at most `width` characters (by char, ellipsis-free).
 fn clip(s: &str, width: u16) -> String {
     s.chars().take(width as usize).collect()
@@ -1630,50 +1783,4 @@ fn tail(s: &str, width: u16) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrap_prefixed_keeps_every_line_within_width() {
-        // The guarantee holds once the width clears the prefix plus the longest
-        // word — the Why panel's real operating range.  (Below that, greedy
-        // wrap can't split a word and the render pass clips as a safety net.)
-        let why = "Dividing the width by the hops spaces the number-line stops out evenly.";
-        for width in [30u16, 40, 50, 60] {
-            let lines = wrap_prefixed("  Why it matters: ", "    ", why, width);
-            assert!(lines.len() > 1, "text should wrap onto multiple lines at width {}", width);
-            for line in &lines {
-                assert!(
-                    line.chars().count() <= width as usize,
-                    "line {:?} ({} cols) exceeds width {}",
-                    line,
-                    line.chars().count(),
-                    width
-                );
-            }
-            assert!(lines[0].contains("Why it matters:"));
-        }
-    }
-
-    #[test]
-    fn wrap_chars_stays_within_width_and_preserves_content() {
-        let s = "When I built a deck I added up every board length precisely.";
-        for width in [10u16, 24, 40] {
-            let lines = wrap_chars(s, width);
-            for line in &lines {
-                assert!(line.chars().count() <= width as usize);
-            }
-            // No characters are lost or invented.
-            assert_eq!(lines.concat(), s);
-        }
-        assert_eq!(wrap_chars("", 8), vec![String::new()]);
-    }
-
-    #[test]
-    fn wrap_text_handles_blank_and_single_word() {
-        assert_eq!(wrap_text("", 10), vec![String::new()]);
-        // A word longer than the width still survives as its own line.
-        let lines = wrap_text("supercalifragilistic", 8);
-        assert_eq!(lines.len(), 1);
-    }
-}
+mod tests;

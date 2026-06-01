@@ -1,15 +1,15 @@
-//! "Why am I learning this?" — real-world uses for each operation.
+//! "Why am I learning this?" — real-world uses for each topic.
 //!
 //! Pressing **Y** asks Deduction Duck why the current subject matters.  Rather
 //! than repeat one canned answer, [`pick`] draws a fresh handful from a big
-//! per-operation list, so the same question keeps surfacing new (and hopefully
+//! per-topic list, so the same question keeps surfacing new (and hopefully
 //! surprising) reasons.
 
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::problem::Op;
+use crate::topic::Topic;
 
 const ADDITION: &[&str] = &[
     "Totalling up the cost of everything in your shopping cart",
@@ -103,6 +103,63 @@ const DIVISION: &[&str] = &[
     "Sharing water rations equally on a long expedition",
 ];
 
+const UNITS: &[&str] = &[
+    "Converting inches to feet when measuring for new furniture",
+    "Swapping cups for millilitres so a recipe works anywhere",
+    "Reading a map's scale to know how far a trip really is",
+    "Turning grams into kilograms to weigh luggage for a flight",
+    "Knowing how many seconds are in an hour to time an experiment",
+    "Converting Celsius to Fahrenheit to dress for the weather",
+    "Changing metres to kilometres to log a run's distance",
+    "Working out how many millilitres of medicine a dose needs",
+    "Reading speed limits when a sign is in km/h instead of mph",
+    "Measuring lumber in centimetres but buying it by the metre",
+    "Converting ounces to pounds at the grocery deli counter",
+    "Knowing litres of fuel to budget for a long drive",
+    "Turning minutes into hours to plan a school schedule",
+    "Scaling a model's millimetres up to a building's metres",
+    "Comparing pack sizes (grams vs. kilograms) for the best deal",
+    "Converting feet to metres when sharing a height worldwide",
+];
+
+const FRACTIONS: &[&str] = &[
+    "Splitting a pizza so everyone gets an equal slice",
+    "Halving a recipe when you only need a smaller batch",
+    "Reading a tape measure marked in halves and quarters",
+    "Sharing a chocolate bar fairly between friends",
+    "Telling time: a quarter past and half past the hour",
+    "Filling a measuring cup to two-thirds for baking",
+    "Splitting a bill three ways at a restaurant",
+    "Knowing a tank is a quarter full before a long drive",
+    "Mixing paint in parts to get just the right shade",
+    "Dividing a garden bed into equal planting rows",
+    "Cutting fabric into equal pieces for a sewing project",
+    "Understanding a sale: take a third off the price",
+    "Sharing screen time so each kid gets a fair fraction",
+    "Reading sheet music where a note lasts half a beat",
+    "Splitting a long hike into equal-distance segments",
+    "Measuring a half-cup of flour with a one-third scoop",
+];
+
+const PERCENTAGES: &[&str] = &[
+    "Working out how much you save with 25% off at a sale",
+    "Reading a phone battery that says it's 80% charged",
+    "Figuring out a tip — 15% or 20% — at a restaurant",
+    "Understanding a test score given as a percentage",
+    "Seeing what percent of a goal a fundraiser has reached",
+    "Comparing loan or savings interest rates as percentages",
+    "Reading a weather forecast: a 70% chance of rain",
+    "Knowing a juice is 100% fruit with no added sugar",
+    "Working out sales tax added to the price of a toy",
+    "Tracking what percent of a video game level is complete",
+    "Understanding nutrition labels: percent of daily value",
+    "Seeing a poll where a candidate has 52% support",
+    "Figuring out a 10% discount coupon at checkout",
+    "Reading how much brighter a screen is at 50% vs 100%",
+    "Comparing two phones by percent of storage used",
+    "Knowing a hill has a 6% grade before biking up it",
+];
+
 // ---------------------------------------------------------------------------
 // "For future coders" — a real line from THIS app and why it matters
 // ---------------------------------------------------------------------------
@@ -162,44 +219,66 @@ const DIV_CODE: &[CodeNote] = &[
     },
 ];
 
-fn code_notes(op: Op) -> &'static [CodeNote] {
-    match op {
-        Op::Add => ADD_CODE,
-        Op::Sub => SUB_CODE,
-        Op::Mul => MUL_CODE,
-        Op::Div => DIV_CODE,
+const UNITS_CODE: &[CodeNote] = &[
+    CodeNote {
+        code: "let metres = feet as f64 * 0.3048;",
+        why: "A conversion factor is just one number you multiply by to switch units.",
+    },
+];
+
+const FRACTIONS_CODE: &[CodeNote] = &[
+    CodeNote {
+        code: "let lit = (slices as f64 * progress) as usize;",
+        why: "Scaling a fraction by progress is how shaded pieces materialize one at a time.",
+    },
+];
+
+const PERCENTAGES_CODE: &[CodeNote] = &[
+    CodeNote {
+        code: "let pct = shaded as f64 / total as f64 * 100.0;",
+        why: "A percent is just a fraction scaled so the whole is always 100.",
+    },
+];
+
+fn code_notes(topic: Topic) -> &'static [CodeNote] {
+    match topic {
+        Topic::Add => ADD_CODE,
+        Topic::Sub => SUB_CODE,
+        Topic::Mul => MUL_CODE,
+        Topic::Div => DIV_CODE,
+        Topic::Units => UNITS_CODE,
+        Topic::Fractions => FRACTIONS_CODE,
+        Topic::Percentages => PERCENTAGES_CODE,
     }
 }
 
-/// Pick a random code peek for `op`: (code line, why it matters).
-pub fn pick_code(op: Op, rng: &mut impl Rng) -> Option<(String, String)> {
-    code_notes(op).choose(rng).map(|n| (n.code.to_string(), n.why.to_string()))
+/// Pick a random code peek for `topic`: (code line, why it matters).
+pub fn pick_code(topic: Topic, rng: &mut impl Rng) -> Option<(String, String)> {
+    code_notes(topic).choose(rng).map(|n| (n.code.to_string(), n.why.to_string()))
 }
 
-fn applications(op: Op) -> &'static [&'static str] {
-    match op {
-        Op::Add => ADDITION,
-        Op::Sub => SUBTRACTION,
-        Op::Mul => MULTIPLICATION,
-        Op::Div => DIVISION,
+fn applications(topic: Topic) -> &'static [&'static str] {
+    match topic {
+        Topic::Add => ADDITION,
+        Topic::Sub => SUBTRACTION,
+        Topic::Mul => MULTIPLICATION,
+        Topic::Div => DIVISION,
+        Topic::Units => UNITS,
+        Topic::Fractions => FRACTIONS,
+        Topic::Percentages => PERCENTAGES,
     }
 }
 
-/// A short heading for the overlay, e.g. "Why learn addition?".
-pub fn heading(op: Op) -> &'static str {
-    match op {
-        Op::Add => "Why learn addition?",
-        Op::Sub => "Why learn subtraction?",
-        Op::Mul => "Why learn multiplication?",
-        Op::Div => "Why learn division?",
-    }
+/// A short heading for the overlay, e.g. "Why learn Addition?".
+pub fn heading(topic: Topic) -> String {
+    format!("Why learn {}?", topic.name())
 }
 
-/// Pick up to `n` distinct real-world uses for `op`, in random order, drawing
+/// Pick up to `n` distinct real-world uses for `topic`, in random order, drawing
 /// from both the built-in list and the teacher's own [`Extras`].
-pub fn pick(op: Op, extras: &Extras, rng: &mut impl Rng, n: usize) -> Vec<String> {
-    let mut all: Vec<String> = applications(op).iter().map(|s| s.to_string()).collect();
-    all.extend(extras.list(op).iter().cloned());
+pub fn pick(topic: Topic, extras: &Extras, rng: &mut impl Rng, n: usize) -> Vec<String> {
+    let mut all: Vec<String> = applications(topic).iter().map(|s| s.to_string()).collect();
+    all.extend(extras.list(topic).iter().cloned());
     all.choose_multiple(rng, n).cloned().collect()
 }
 
@@ -220,6 +299,12 @@ pub struct Extras {
     mul: Vec<String>,
     #[serde(default)]
     div: Vec<String>,
+    #[serde(default)]
+    units: Vec<String>,
+    #[serde(default)]
+    fractions: Vec<String>,
+    #[serde(default)]
+    percentages: Vec<String>,
 }
 
 impl Extras {
@@ -240,34 +325,40 @@ impl Extras {
         }
     }
 
-    fn list(&self, op: Op) -> &[String] {
-        match op {
-            Op::Add => &self.add,
-            Op::Sub => &self.sub,
-            Op::Mul => &self.mul,
-            Op::Div => &self.div,
+    fn list(&self, topic: Topic) -> &[String] {
+        match topic {
+            Topic::Add => &self.add,
+            Topic::Sub => &self.sub,
+            Topic::Mul => &self.mul,
+            Topic::Div => &self.div,
+            Topic::Units => &self.units,
+            Topic::Fractions => &self.fractions,
+            Topic::Percentages => &self.percentages,
         }
     }
 
-    /// The teacher's own anecdotes for `op` (for display in the Teacher Area).
-    pub fn items(&self, op: Op) -> &[String] {
-        self.list(op)
+    /// The teacher's own anecdotes for `topic` (for display in the Teacher Area).
+    pub fn items(&self, topic: Topic) -> &[String] {
+        self.list(topic)
     }
 
-    fn list_mut(&mut self, op: Op) -> &mut Vec<String> {
-        match op {
-            Op::Add => &mut self.add,
-            Op::Sub => &mut self.sub,
-            Op::Mul => &mut self.mul,
-            Op::Div => &mut self.div,
+    fn list_mut(&mut self, topic: Topic) -> &mut Vec<String> {
+        match topic {
+            Topic::Add => &mut self.add,
+            Topic::Sub => &mut self.sub,
+            Topic::Mul => &mut self.mul,
+            Topic::Div => &mut self.div,
+            Topic::Units => &mut self.units,
+            Topic::Fractions => &mut self.fractions,
+            Topic::Percentages => &mut self.percentages,
         }
     }
 
-    /// Append a teacher's own reason for `op` (trimmed; blanks ignored).
-    pub fn add(&mut self, op: Op, text: &str) {
+    /// Append a teacher's own reason for `topic` (trimmed; blanks ignored).
+    pub fn add(&mut self, topic: Topic, text: &str) {
         let text = text.trim();
         if !text.is_empty() {
-            self.list_mut(op).push(text.to_string());
+            self.list_mut(topic).push(text.to_string());
         }
     }
 }

@@ -43,16 +43,6 @@ impl Op {
     /// All four operations, in menu order.
     pub const ALL: [Op; 4] = [Op::Add, Op::Sub, Op::Mul, Op::Div];
 
-    /// Index into [`Op::ALL`] / per-operation stat arrays.
-    pub fn index(self) -> usize {
-        match self {
-            Op::Add => 0,
-            Op::Sub => 1,
-            Op::Mul => 2,
-            Op::Div => 3,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Op::Add => "Add",
