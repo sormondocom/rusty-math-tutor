@@ -11,6 +11,30 @@
         ^^ ^^      ( Deduction Duck, at your service )
 ```
 
+[![Latest release](https://img.shields.io/github/v/release/sormondocom/rusty-math-tutor?label=download&sort=semver)](https://github.com/sormondocom/rusty-math-tutor/releases/latest)
+
+## ⬇️ Download — no compiling needed
+
+Grab a ready-to-run program from the [**latest release**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) — no Rust, no build step:
+
+| Your device | Download |
+|-------------|----------|
+| **Windows** (most PCs) | [rusty-math-tutor-windows-x86_64.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64.exe) |
+| **Chromebook** — Intel / AMD | [rusty-math-tutor-linux-x86_64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-x86_64) |
+| **Chromebook** — ARM | [rusty-math-tutor-linux-aarch64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-aarch64) |
+
+- **Windows:** double-click the `.exe`, or run it from a terminal. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
+- **Chromebook:** these run in the built-in **Linux (Crostini)** environment — turn it on at *Settings → Advanced → Developers → Linux development environment*, then in the Linux terminal:
+  ```sh
+  chmod +x rusty-math-tutor-linux-x86_64   # the file you downloaded
+  ./rusty-math-tutor-linux-x86_64
+  ```
+  Most Chromebooks are Intel/AMD (`x86_64`); pick `aarch64` only if `uname -m` prints `aarch64`.
+
+> Want the build from a specific commit? Every run of the **Build executables** workflow also uploads the binaries as downloadable artifacts on the [Actions tab](https://github.com/sormondocom/rusty-math-tutor/actions) (those need a GitHub login and expire after 90 days).
+
+---
+
 **A console math tutor for kindergarten through 8th grade**, built in Rust.
 One problem fills the screen at a time so a young learner can focus — no visible
 queue, no ticking clock (the timed mode is opt-in). Mix and match the sections
@@ -88,6 +112,8 @@ card required. The goal is to help children, not to sell hardware.
 ---
 
 ## Build & run
+
+> Just want to use it? [**Download a ready-made executable**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) (see the table at the top) — no toolchain required. Build from source only if you want to hack on it.
 
 Requires a [Rust toolchain](https://rustup.rs/) (stable).
 
