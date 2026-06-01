@@ -27,37 +27,89 @@ const ACCENTS: [Color; 6] = [
     Color::LightBlue,
 ];
 
+/// How long (in ticks) a still text scene lingers before moving on.
+pub const TEXT_DWELL: u32 = 24;
+/// The animated night-sky scene lingers longer so the moon can finish rising
+/// and the comet stream gets time to play.
+pub const SKY_DWELL: u32 = 130;
+/// The rocket scene needs time to launch, form the name, and let a comet pass.
+pub const ROCKET_DWELL: u32 = 150;
+
+/// What a scene draws.  Most scenes are still text; some are live animations.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SceneKind {
+    /// A centred big number (optional) plus heading and sub-heading.
+    Text,
+    /// A night sky: a comet stream, the student's name written among the stars,
+    /// and a moon rising underneath.  Driven by the scene's elapsed frame.
+    NameSky,
+    /// Rockets launch and become the stars that spell the learner's name, after
+    /// which a blue comet passes behind it.  Driven by the scene's elapsed frame.
+    RocketName,
+}
+
 /// One screen of a milestone cinematic.
 pub struct Scene {
+    pub kind: SceneKind,
     pub accent: Color,
     /// Optional block-font centrepiece (digits/symbols only — e.g. the count).
     pub big: Option<String>,
     pub heading: String,
     pub sub: String,
+    /// How many ticks to linger on this scene before transitioning onward.
+    pub dwell: u32,
+}
+
+impl Scene {
+    /// A still text scene with the default dwell.
+    fn text(accent: Color, big: Option<String>, heading: String, sub: String) -> Scene {
+        Scene { kind: SceneKind::Text, accent, big, heading, sub, dwell: TEXT_DWELL }
+    }
 }
 
 /// Build the cinematic for `name` reaching `count` problems solved.
 pub fn scenes(name: &str, count: u32, rng: &mut impl Rng) -> Vec<Scene> {
     vec![
-        Scene {
-            accent: *ACCENTS.choose(rng).unwrap(),
-            big: Some(count.to_string()),
-            heading: "PROBLEMS SOLVED!".to_string(),
-            sub: "★   ★   ★".to_string(),
-        },
-        Scene {
-            accent: *ACCENTS.choose(rng).unwrap(),
-            big: None,
-            heading: format!("Way to go, {}!", name),
-            sub: "You're unstoppable!".to_string(),
-        },
-        Scene {
-            accent: *ACCENTS.choose(rng).unwrap(),
-            big: None,
-            heading: milestone_line(count).to_string(),
-            sub: "Keep up the amazing work!".to_string(),
-        },
+        Scene::text(
+            *ACCENTS.choose(rng).unwrap(),
+            Some(count.to_string()),
+            "PROBLEMS SOLVED!".to_string(),
+            "★   ★   ★".to_string(),
+        ),
+        // The showpiece — the learner's name in the sky.  Pick one of two for
+        // variety across milestones.
+        name_showpiece(name, rng),
+        Scene::text(
+            *ACCENTS.choose(rng).unwrap(),
+            None,
+            milestone_line(count).to_string(),
+            "Keep up the amazing work!".to_string(),
+        ),
     ]
+}
+
+/// A name-in-the-sky scene: either rockets that form the name (then a blue comet
+/// passes behind), or a comet-streaked sky with a rising moon.
+fn name_showpiece(name: &str, rng: &mut impl Rng) -> Scene {
+    if rng.gen_bool(0.5) {
+        Scene {
+            kind: SceneKind::RocketName,
+            accent: Color::Rgb(255, 232, 150), // warm starlight
+            big: None,
+            heading: name.to_string(),
+            sub: "written in the stars!".to_string(),
+            dwell: ROCKET_DWELL,
+        }
+    } else {
+        Scene {
+            kind: SceneKind::NameSky,
+            accent: Color::LightCyan,
+            big: None,
+            heading: name.to_string(),
+            sub: "written in the stars!".to_string(),
+            dwell: SKY_DWELL,
+        }
+    }
 }
 
 fn milestone_line(count: u32) -> &'static str {

@@ -54,7 +54,8 @@ pub const ANECDOTE_MAX: usize = 1024;
 pub struct Cinematic {
     pub scenes: Vec<crate::cinematic::Scene>,
     pub index: usize,
-    dwell: u32,
+    /// Ticks left to linger on the current scene (counts down from its dwell).
+    pub dwell: u32,
     pub transition: Option<Transition>,
     started: Instant,
 }
@@ -389,15 +390,17 @@ impl App {
             if t.advance() {
                 c.transition = None;
                 c.index += 1;
-                c.dwell = SCENE_DWELL;
+                c.dwell = c.scenes.get(c.index).map_or(SCENE_DWELL, |s| s.dwell);
             }
         } else {
             c.dwell = c.dwell.saturating_sub(1);
             if c.dwell == 0 {
                 if c.index + 1 < c.scenes.len() {
                     let area = self.area;
-                    let from = capture_scene(area, &c.scenes[c.index]);
-                    let to = capture_scene(area, &c.scenes[c.index + 1]);
+                    // Leave the current scene at its settled (fully animated) end
+                    // and enter the next at its start frame for smooth continuity.
+                    let from = capture_scene(area, &c.scenes[c.index], c.scenes[c.index].dwell as u64);
+                    let to = capture_scene(area, &c.scenes[c.index + 1], 0);
                     c.transition = Some(Transition::new(from, to, &mut self.rng));
                 } else {
                     finished = true;
@@ -1168,10 +1171,11 @@ impl App {
         let name = self.roster.current().name.clone();
         let scenes = crate::cinematic::scenes(&name, total, &mut self.rng);
         self.cinematic_return = self.screen;
+        let dwell = scenes.first().map_or(SCENE_DWELL, |s| s.dwell);
         self.cinematic = Some(Cinematic {
             scenes,
             index: 0,
-            dwell: SCENE_DWELL,
+            dwell,
             transition: None,
             started: Instant::now(),
         });
@@ -1185,10 +1189,11 @@ fn bump(v: i64, up: bool, delta: i64, min: i64, max: i64) -> i64 {
     next.clamp(min, max)
 }
 
-/// Render a cinematic scene into a fresh buffer for transition capture.
-fn capture_scene(area: Rect, scene: &crate::cinematic::Scene) -> Buffer {
+/// Render a cinematic scene into a fresh buffer for transition capture, frozen
+/// at `frame` ticks (animated scenes settle to that point).
+fn capture_scene(area: Rect, scene: &crate::cinematic::Scene, frame: u64) -> Buffer {
     let mut buf = Buffer::empty(area);
-    ui::render_scene(area, &mut buf, scene);
+    ui::render_scene(area, &mut buf, scene, frame);
     buf
 }
 

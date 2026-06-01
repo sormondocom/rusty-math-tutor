@@ -424,6 +424,154 @@ fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
     out
 }
 
+fn sky_scene(name: &str) -> crate::cinematic::Scene {
+    use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
+    Scene {
+        kind: SceneKind::NameSky,
+        accent: ratatui::style::Color::LightCyan,
+        big: None,
+        heading: name.to_string(),
+        sub: "written in the stars!".to_string(),
+        dwell: SKY_DWELL,
+    }
+}
+
+#[test]
+fn deduction_duck_gazes_up_in_awe() {
+    let area = Rect::new(0, 0, 70, 22);
+
+    // The awe duck appears in both showpiece scenes, wearing its graduate cap.
+    for scene in [rocket_scene("Ada"), sky_scene("Ada")] {
+        let text = render_at(&scene, area, 70);
+        assert!(text.contains("[___]"), "Deduction Duck (graduate cap) should be present");
+        assert!(text.contains("(**)") || text.contains("(°°)"), "the duck gazes up, starry-eyed");
+    }
+
+    // Its eyes twinkle across the two-frame loop (** on even, °° on odd).
+    let scene = sky_scene("Ada");
+    let even = render_at(&scene, area, 64); // 64/8 = 8, even
+    let odd = render_at(&scene, area, 72); //  72/8 = 9, odd
+    assert!(even.contains("(**)"), "even frame: starry eyes");
+    assert!(odd.contains("(°°)"), "odd frame: wide-eyed wonder");
+
+    // No room on a tiny terminal — the duck bows out rather than overflow.
+    let tiny = Rect::new(0, 0, 22, 11);
+    let text = render_at(&rocket_scene("Ada"), tiny, 70);
+    assert!(!text.contains("[___]"), "no duck when the sky is too small");
+}
+
+fn rocket_scene(name: &str) -> crate::cinematic::Scene {
+    use crate::cinematic::{Scene, SceneKind, ROCKET_DWELL};
+    Scene {
+        kind: SceneKind::RocketName,
+        accent: ratatui::style::Color::Rgb(255, 232, 150),
+        big: None,
+        heading: name.to_string(),
+        sub: "written in the stars!".to_string(),
+        dwell: ROCKET_DWELL,
+    }
+}
+
+fn render_at(scene: &crate::cinematic::Scene, area: Rect, frame: u64) -> String {
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    crate::ui::render_scene(area, &mut buf, scene, frame);
+    buffer_to_string(&buf)
+}
+
+#[test]
+fn rockets_launch_then_form_the_name() {
+    let scene = rocket_scene("Ada");
+    let area = Rect::new(0, 0, 70, 22);
+
+    // Early on, rockets are climbing and the name has not formed yet.
+    let early = render_at(&scene, area, 4);
+    assert!(early.contains('▲'), "rockets should be launching early");
+    assert!(!early.contains("Ada"), "the name should not be spelled yet");
+
+    // After the launch, the name is written in stars (no rockets left).
+    let formed = render_at(&scene, area, 40);
+    assert!(formed.contains("Ada"), "rockets should have formed the name");
+    assert!(!formed.contains('▲'), "no rockets remain once the name is formed");
+}
+
+#[test]
+fn blue_comet_passes_behind_the_formed_name() {
+    let scene = rocket_scene("Ada");
+    let area = Rect::new(0, 0, 70, 22);
+    // During the comet sweep the name stays fully legible (it's drawn on top)
+    // and the comet's head star is present somewhere in the sky.
+    let mut saw_comet = false;
+    for frame in 55..95 {
+        let text = render_at(&scene, area, frame);
+        assert!(text.contains("Ada"), "the name must remain on top of the comet");
+        if text.contains('★') {
+            saw_comet = true;
+        }
+    }
+    assert!(saw_comet, "a comet should sweep through during the scene");
+}
+
+#[test]
+fn rocket_name_survives_a_cramped_sky() {
+    let scene = rocket_scene("Zo");
+    for (w, h) in [(10u16, 6u16), (16, 9), (40, 10), (120, 40)] {
+        let area = Rect::new(0, 0, w, h);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        for frame in [0u64, 30, 80, 150] {
+            crate::ui::render_scene(area, &mut buf, &scene, frame);
+        }
+    }
+}
+
+#[test]
+fn name_sky_cinematic_writes_the_name_and_raises_the_moon() {
+    use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
+    let scene = Scene {
+        kind: SceneKind::NameSky,
+        accent: ratatui::style::Color::LightCyan,
+        big: None,
+        heading: "Ada".to_string(),
+        sub: "written in the stars!".to_string(),
+        dwell: SKY_DWELL,
+    };
+
+    // At the start the moon is still below; well into the scene it has risen.
+    let area = Rect::new(0, 0, 70, 22);
+    let moon_top_row = |frame: u64| -> Option<u16> {
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::ui::render_scene(area, &mut buf, &scene, frame);
+        let text = buffer_to_string(&buf);
+        // The name is always written in the sky.
+        assert!(text.contains("Ada"), "the learner's name should be in the sky");
+        // Find the row holding the moon's top arc.
+        text.lines().position(|l| l.contains(".-\"\"\"-.")).map(|r| r as u16)
+    };
+    let early = moon_top_row(2).unwrap();
+    let late = moon_top_row(60).unwrap();
+    assert!(late < early, "the moon should rise (move up) as the scene plays");
+}
+
+#[test]
+fn name_sky_survives_a_cramped_sky() {
+    // The animation must never write out of bounds, even on a tiny terminal.
+    use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
+    let scene = Scene {
+        kind: SceneKind::NameSky,
+        accent: ratatui::style::Color::LightCyan,
+        big: None,
+        heading: "Zo".to_string(),
+        sub: "written in the stars!".to_string(),
+        dwell: SKY_DWELL,
+    };
+    for (w, h) in [(10u16, 6u16), (16, 9), (40, 10), (120, 40)] {
+        let area = Rect::new(0, 0, w, h);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        for frame in [0u64, 30, SKY_DWELL as u64] {
+            crate::ui::render_scene(area, &mut buf, &scene, frame);
+        }
+    }
+}
+
 #[test]
 fn teacher_records_show_every_section_score() {
     use crate::topic::Topic;

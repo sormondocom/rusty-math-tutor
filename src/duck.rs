@@ -23,6 +23,8 @@ pub enum Pose {
     WalkRight,
     /// Mid-karate-chop, smashing a number apart.
     Smash,
+    /// Facing up, starry-eyed, wings thrown up — gazing at the sky in awe.
+    Awe,
 }
 
 // Facing left — looks back toward the problem.  Frames differ at the feet.
@@ -85,12 +87,34 @@ const SMASH_B: [&str; HEIGHT as usize] = [
     "  ^^ ^^  ",
 ];
 
+// Gazing up in awe — starry eyes, wings flung up (they rise beside the cap on
+// the second frame for a little "wow!" flutter).
+const AWE_A: [&str; HEIGHT as usize] = [
+    "   ___   ",
+    "  [___]  ",
+    "    |    ",
+    "  \\(**)/ ",
+    "   (  )  ",
+    "   |  |  ",
+    "   ^^^^  ",
+];
+const AWE_B: [&str; HEIGHT as usize] = [
+    " \\ ___ / ",
+    "  [___]  ",
+    "    |    ",
+    "   (°°)  ",
+    "   (  )  ",
+    "   |  |  ",
+    "   ^^^^  ",
+];
+
 fn sprite(pose: Pose, frame: u64) -> &'static [&'static str; HEIGHT as usize] {
     let even = frame % 2 == 0;
     match pose {
         Pose::Stand => if even { &STAND_A } else { &STAND_B },
         Pose::WalkRight => if even { &WALK_A } else { &WALK_B },
         Pose::Smash => if even { &SMASH_A } else { &SMASH_B },
+        Pose::Awe => if even { &AWE_A } else { &AWE_B },
     }
 }
 
