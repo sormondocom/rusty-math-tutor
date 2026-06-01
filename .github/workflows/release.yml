@@ -1,9 +1,10 @@
 # Builds ready-to-run executables so people don't have to compile from source.
 #
-# - Push a version tag (e.g. `v0.1.0`) to build the binaries AND attach them to
-#   a GitHub Release on the Releases page.
+# - Publish a GitHub Release from a tag (Releases -> "Draft a new release" ->
+#   pick/create a tag like `v0.1.0` -> Publish) and this builds the binaries and
+#   attaches them to that release automatically.
 # - Or run it by hand from the Actions tab ("Run workflow") to just get the
-#   binaries as downloadable build artifacts.
+#   binaries as downloadable build artifacts (no release upload).
 #
 # Targets:
 #   - Windows (x86_64)            -> rusty-math-tutor-windows-x86_64.exe
@@ -16,12 +17,12 @@
 name: Build executables
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
-  contents: write # needed to create the Release and upload assets
+  contents: write # needed to upload assets onto the release
 
 jobs:
   # Don't ship a broken build: the whole suite must pass first.
@@ -90,8 +91,9 @@ jobs:
           if-no-files-found: error
 
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           files: dist/${{ matrix.asset }}
           fail_on_unmatched_files: true
