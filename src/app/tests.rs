@@ -425,6 +425,37 @@ fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
 }
 
 #[test]
+fn teacher_records_show_every_section_score() {
+    use crate::topic::Topic;
+    let mut app = App::new(Config::default());
+    app.roster = crate::student::Roster::default();
+    // Give the current student one solve in each non-arithmetic section.
+    {
+        let s = app.roster.current_mut();
+        s.record_topic(Topic::Units);
+        s.record_topic(Topic::Fractions);
+        s.record_topic(Topic::Percentages);
+        s.record_topic(Topic::Percentages);
+    }
+    app.screen = Screen::Teacher;
+    app.teacher_authed = true;
+    app.teacher_view = TeacherView::Records;
+    app.set_area(Rect::new(0, 0, 80, 24));
+
+    let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    term.draw(|f| ui::draw(f, &app)).unwrap();
+    let text = buffer_to_string(term.backend().buffer());
+
+    // The header carries a column for every section beyond the four ops.
+    for h in ["Un", "Fr", "Pct", "Total", "Lock"] {
+        assert!(text.contains(h), "records header missing {h:?} column");
+    }
+    // The Percentages count (2) and grand total (4) show in the row.
+    assert!(app.roster.current().solved_for(Topic::Percentages) == 2);
+    assert!(app.roster.current().grand_total() == 4);
+}
+
+#[test]
 fn percent_card_reads_as_a_percent_not_a_fraction() {
     // Regression: a percentage problem reuses the shape card, but must NOT tell
     // the child to "type like 2/4" — it asks for a whole number percent.

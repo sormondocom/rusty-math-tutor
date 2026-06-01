@@ -833,14 +833,36 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
     }
 }
 
+/// Short column headers for each section, in [`Topic::ALL`] order.  Kept to a
+/// few characters so all seven sections fit one row.
+const REC_COLS: [&str; 7] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct"];
+/// Left edge of the name column within the 5-wide section grid.
+const REC_NAME_W: u16 = 12;
+/// Width of each per-section count column.
+const REC_COL_W: u16 = 5;
+
 fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
     let sel_topic = app.teacher_topic;
-    // Column header (the last column is each student's reveal limit).
-    let header = format!("{:<14}{:>6}{:>6}{:>6}{:>6}{:>7}{:>7}", "Student", "Add", "Sub", "Mul", "Div", "Total", "Lock");
-    put_str(buf, col, area.top() + 3, &header, Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD));
+    // One compact column per section, then Total and the reveal Lock.
+    let mut header = format!("{:<width$}", "Student", width = REC_NAME_W as usize);
+    for c in REC_COLS {
+        header.push_str(&format!("{:>w$}", c, w = REC_COL_W as usize));
+    }
+    header.push_str(&format!("{:>7}{:>6}", "Total", "Lock"));
+    let header_y = area.top() + 3;
+    put_str(buf, col, header_y, &header, Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD));
+    // Highlight the selected section's column header — this is what S/R resets.
+    let sel_x = col + REC_NAME_W + sel_topic as u16 * REC_COL_W;
+    put_str(
+        buf,
+        sel_x,
+        header_y,
+        format!("{:>w$}", REC_COLS[sel_topic], w = REC_COL_W as usize),
+        Style::default().fg(Color::Black).bg(Color::LightYellow).add_modifier(Modifier::BOLD),
+    );
 
     let list_top = area.top() + 4;
-    let (scroll, visible) = scroll_window(app.roster.students.len(), app.teacher_rec_index, list_top, area.bottom().saturating_sub(5));
+    let (scroll, visible) = scroll_window(app.roster.students.len(), app.teacher_rec_index, list_top, area.bottom().saturating_sub(4));
     let mut y = list_top;
     for (i, s) in app.roster.students.iter().enumerate().skip(scroll).take(visible) {
         let selected = i == app.teacher_rec_index;
@@ -850,23 +872,12 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
             Style::default().fg(Color::White)
         };
         let lock = if s.reveal_lock == 0 { "off".to_string() } else { s.reveal_lock.to_string() };
-        let row = format!(
-            "{:<14}{:>6}{:>6}{:>6}{:>6}{:>7}{:>7}",
-            clip(&s.name, 14),
-            s.solved[0],
-            s.solved[1],
-            s.solved[2],
-            s.solved[3],
-            s.grand_total(),
-            lock,
-        );
-        put_str(buf, col, y, &row, base);
-        // The table only has columns for the four arithmetic ops; mark the
-        // selected one there, otherwise note the section name above the table.
-        if selected && sel_topic < 4 {
-            let mark_x = col + 14 + sel_topic as u16 * 6;
-            put_str(buf, mark_x, y.saturating_sub(1), "▼", Style::default().fg(Color::LightYellow));
+        let mut row = format!("{:<width$}", clip(&s.name, REC_NAME_W), width = REC_NAME_W as usize);
+        for &t in &crate::topic::Topic::ALL {
+            row.push_str(&format!("{:>w$}", s.solved_for(t), w = REC_COL_W as usize));
         }
+        row.push_str(&format!("{:>7}{:>6}", s.grand_total(), lock));
+        put_str(buf, col, y, &row, base);
         y += 1;
     }
     if scroll > 0 {
@@ -876,28 +887,11 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         put_str(buf, col, y.saturating_sub(1), "↓", Style::default().fg(Color::LightCyan));
     }
 
-    // Name the selected section (the table only shows columns for the four ops).
-    let topic = crate::topic::Topic::ALL[sel_topic];
-    let sel_student = &app.roster.students[app.teacher_rec_index.min(app.roster.students.len() - 1)];
-    put_str(
-        buf,
-        col,
-        area.bottom().saturating_sub(4),
-        format!("Section for S reset:  < {} >  = {}", topic.name(), sel_student.solved_for(topic)),
-        Style::default().fg(Color::LightYellow),
-    );
-    put_str(
-        buf,
-        col,
-        area.bottom().saturating_sub(3),
-        "Lock = answer peeks allowed before a cooldown (0 = never lock).",
-        Style::default().fg(Color::Gray),
-    );
     put_str(
         buf,
         col,
         area.bottom().saturating_sub(2),
-        "Up/Down student   <> section   S/R reset   X remove   +/- lock   Esc out",
+        "Up/Dn student   <> section   S/R reset   X remove   +/- lock(0=off)   Esc out",
         Style::default().fg(Color::DarkGray),
     );
 }
