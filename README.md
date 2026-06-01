@@ -14,8 +14,8 @@
 **A console math tutor for kindergarten through 8th grade**, built in Rust.
 One problem fills the screen at a time so a young learner can focus — no visible
 queue, no ticking clock (the timed mode is opt-in). Mix and match the sections
-you want practised — **arithmetic, units of measure, fractions, and
-percentages** — and every correct answer melts into the next problem through a
+you want practised — **arithmetic, units of measure, fractions, percentages, and
+geometry** — and every correct answer melts into the next problem through a
 randomly chosen, GPU-free transition. Press **H** any time to summon
 **Deduction Duck** for a strategy or a hint.
 
@@ -27,7 +27,7 @@ card required. The goal is to help children, not to sell hardware.
 ## Highlights
 
 - **One problem at a time**, drawn big in a hand-built block font.
-- **Seven learnable sections**, any combination mixed into a session:
+- **Eight learnable sections**, any combination mixed into a session:
   - **Four operations** — addition, subtraction, multiplication, division — with
     per-grade number ranges (K–8) that you can tune.
   - **Units of Measure** — friendly conversion problems (cups, metres, grams,
@@ -38,6 +38,11 @@ card required. The goal is to help children, not to sell hardware.
     dividers). Answers are checked for *equivalence*, so `1/2` is accepted for
     `2/4`.
   - **Percentages** — the same shapes, read as a whole-number percent out of 100.
+  - **Geometry** — **perimeter, area, and volume** of outlined shapes drawn as
+    polished text glyphs: rectangles, squares, triangles, **circles**, and a
+    3-D wireframe **box/cube**, each labelled with its dimensions. Circles are
+    answered **in terms of π** (you type the whole-number coefficient), so every
+    answer stays exact.
   - **Experimentation** — a free-form unit explorer: type any amount (even a
     silly one) and watch it convert between units.
 - **Horizontal or vertical layouts**: inline `12 + 7 = ?`, the stacked column
@@ -49,7 +54,8 @@ card required. The goal is to help children, not to sell hardware.
     partial products, regrouping); or explains it step by step (make-a-ten,
     doubling, think-multiplication, equal groups). Press **Space** for *another
     way*.
-  - on units, fractions, and percentages he offers a how-to **hint**.
+  - on units, fractions, percentages, and geometry he offers a how-to **hint**
+    (e.g. "Area = ½ × base × height").
   - **Hint first** — the method shows first; press **R** to reveal the answer.
 - **A gentle peek cooldown** — leaning on **R** too often puts the answer on a
   short cooldown, and Deduction Duck offers a kind, clever nudge instead ("A
@@ -114,9 +120,9 @@ Choose a graphics mode (see *Current state* below), then **Enter**.
 | `Q` | Quit |
 
 Rows: **Student**, **Grade**, the four **operation toggles**, **Units of
-Measure**, **Fractions**, **Percentages**, **Show problems** (layout),
-**Settings**, **My Progress**, **Teacher Area**, **Start Practice**, **Start
-Challenge**, **Experimentation**.
+Measure**, **Fractions**, **Percentages**, **Geometry**, **Show problems**
+(layout), **Settings**, **My Progress**, **Teacher Area**, **Start Practice**,
+**Start Challenge**, **Experimentation**.
 
 ### Practice / Challenge
 | Key | Action |
@@ -133,13 +139,13 @@ Challenge**, **Experimentation**.
 | `V` | Switch horizontal / vertical layout (arithmetic) |
 | `Esc` | Peel back an overlay, then return to the menu |
 
-Fractions are typed as `a/b` (any equivalent form is accepted); percentages are
-typed as a whole number.
+Fractions are typed as `a/b` (any equivalent form is accepted); percentages,
+geometry, and circle answers (the number before π) are typed as a whole number.
 
 ### Teacher Area
 First visit asks you to **create a password**; later visits ask for it.
 `Tab` switches between the two tools; `L` cycles the measurement **locality**.
-- **Why? Examples** — `← →` pick a **section** (any of the seven), `A` to add
+- **Why? Examples** — `← →` pick a **section** (any of the eight), `A` to add
   your own real-life example for it.
 - **Student Records** — a column per section. `↑↓` pick a student, `← →` pick
   the section to act on, `S` reset that section, `R` reset all of a student's
@@ -169,8 +175,9 @@ field from `config.json` and the next visit will let you set a new one.
 This is an actively evolving first-pass project. **Implemented and working
 today:**
 
-- Seven sections — four operations, Units of Measure, Fractions, and
-  Percentages — freely mixed into a session, with K–8 grade scaling and
+- Eight sections — four operations, Units of Measure, Fractions, Percentages,
+  and Geometry (perimeter / area / volume of outlined shapes, including circles
+  in terms of π) — freely mixed into a session, with K–8 grade scaling and
   configurable ranges.
 - The Experimentation unit explorer and per-locality units/currency.
 - Horizontal / vertical layouts incl. the long-division house.
