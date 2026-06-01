@@ -1,0 +1,97 @@
+# Builds ready-to-run executables so people don't have to compile from source.
+#
+# - Push a version tag (e.g. `v0.1.0`) to build the binaries AND attach them to
+#   a GitHub Release on the Releases page.
+# - Or run it by hand from the Actions tab ("Run workflow") to just get the
+#   binaries as downloadable build artifacts.
+#
+# Targets:
+#   - Windows (x86_64)            -> rusty-math-tutor-windows-x86_64.exe
+#   - Chromebook / Linux (Intel)  -> rusty-math-tutor-linux-x86_64
+#   - Chromebook / Linux (ARM)    -> rusty-math-tutor-linux-aarch64
+#
+# The Linux builds are statically linked against musl, so they run inside a
+# Chromebook's Linux (Crostini) container without any glibc-version surprises.
+
+name: Build executables
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the Release and upload assets
+
+jobs:
+  # Don't ship a broken build: the whole suite must pass first.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --all
+
+  build:
+    name: Build (${{ matrix.label }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: tutor.exe
+            asset: rusty-math-tutor-windows-x86_64.exe
+          - label: chromebook-linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin: tutor
+            asset: rusty-math-tutor-linux-x86_64
+          - label: chromebook-linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            bin: tutor
+            asset: rusty-math-tutor-linux-aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl linker
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.asset }}
+          fail_on_unmatched_files: true
