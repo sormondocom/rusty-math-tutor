@@ -424,6 +424,22 @@ fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
     out
 }
 
+#[test]
+fn title_screens_feature_deduction_duck() {
+    // The "Featuring: Deduction Duck" tagline appears under the title on both
+    // the startup picker and the main menu.
+    for screen in [Screen::Startup, Screen::Menu] {
+        let mut app = App::new(Config::default());
+        app.roster = crate::student::Roster::default();
+        app.screen = screen;
+        app.set_area(Rect::new(0, 0, 70, 22));
+        let mut term = Terminal::new(TestBackend::new(70, 22)).unwrap();
+        term.draw(|f| ui::draw(f, &app)).unwrap();
+        let text = buffer_to_string(term.backend().buffer());
+        assert!(text.contains("Featuring:  Deduction Duck"), "{screen:?} should feature Deduction Duck");
+    }
+}
+
 fn sky_scene(name: &str) -> crate::cinematic::Scene {
     use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
     Scene {

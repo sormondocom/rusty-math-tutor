@@ -664,6 +664,8 @@ fn draw_startup(f: &mut Frame, app: &App, area: Rect) {
     let title = "1 + 1 = ?";
     font::draw_text(buf, center(area, font::text_width(title)), area.top() + 2, title, Style::default().fg(Color::LightCyan));
     put_str(buf, center(area, 17), area.top() + 8, "RUSTY MATH TUTOR", Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    let featuring = "Featuring:  Deduction Duck";
+    put_str(buf, center(area, featuring.chars().count() as u16), area.top() + 9, featuring, Style::default().fg(DUCK_COLOR).add_modifier(Modifier::BOLD));
     put_str(buf, center(area, 18), area.top() + 10, "Choose how to draw:", Style::default().fg(Color::Gray));
 
     let modes = [GraphicsMode::Low, GraphicsMode::Cpu];
@@ -697,6 +699,8 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     let title = "1 + 1 = ?";
     font::draw_text(buf, center(area, font::text_width(title)), area.top() + 1, title, Style::default().fg(Color::LightCyan));
     put_str(buf, center(area, 17), area.top() + 6, "RUSTY MATH TUTOR", Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    let featuring = "Featuring:  Deduction Duck";
+    put_str(buf, center(area, featuring.chars().count() as u16), area.top() + 7, featuring, Style::default().fg(DUCK_COLOR).add_modifier(Modifier::BOLD));
 
     let col = area.left() + area.width.saturating_sub(42) / 2;
     let sel = app.menu_index;
