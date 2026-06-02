@@ -135,18 +135,30 @@ This keeps one layout in the core and lets each surface present it natively.
 
 ## 5. Phased roadmap
 
-### Phase 0 — Decouple (the cross-platform foundation) — _next_
+### Phase 0 — Decouple (the cross-platform foundation) — _in progress_
 
 No new dependencies. Strangler-fig migration; the test suite stays green at every
 step.
 
-- [ ] Add `Renderer`, `InputEvent`, `Storage` traits + logical primitives.
-- [ ] Implement all three for the **terminal** by wrapping existing code —
-      **zero visual change** (the render/never-panic tests guard this).
-- [ ] Flip `main.rs` to `on_event` / `update` / `render`, terminal frontend
-      driving it.
-- [ ] Move `app` off `crossterm`/`ratatui`/`fs` types; relocate modules into
-      `core/` vs `frontends/terminal/`.
+**Step 1 — Input seam ✅ done**
+- [x] `InputEvent` / `Key` / `Mods` in [`src/input.rs`](../src/input.rs).
+- [x] Terminal frontend maps `crossterm` → `InputEvent` in `main.rs::to_input`.
+- [x] `App::on_event(InputEvent)`; `app` no longer imports `crossterm`.
+      47 tests green, zero behavior change.
+
+**Step 2 — Render seam — _next_**
+- [ ] `Renderer` trait + logical primitives; terminal impl wraps `ui.rs` /
+      `shapes.rs` / `font.rs`.
+- [ ] `App::render(&mut dyn Renderer)`; `main.rs` drives it. Transitions move to
+      the terminal frontend.
+
+**Step 3 — Storage seam**
+- [ ] `Storage` trait; terminal = filesystem (`config::data_path`), web =
+      `localStorage` later. `app`/`config`/`student` stop calling `std::fs`
+      directly.
+
+**Step 4 — Relocate**
+- [ ] Move modules into `core/` vs `frontends/terminal/`.
 
 Exit criteria: identical behavior, full suite green, `app` has no `crossterm`,
 `ratatui`, or `std::fs` imports.
@@ -232,3 +244,5 @@ _Decision log_
   (chosen over web-first and terminal-enhanced-first).
 - **Renderer style:** immediate-mode `Renderer` trait (tentative).
 - **Transitions:** owned per-frontend, not core.
+- **Phase 0 step 1 (input seam): done** — `InputEvent`/`Key`/`Mods`; `app` is
+  off `crossterm`; crossterm now lives only in the terminal frontend (main.rs).

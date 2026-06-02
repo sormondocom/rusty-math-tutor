@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::input::{InputEvent, Key, Mods};
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use ratatui::buffer::Buffer;
@@ -437,22 +437,30 @@ impl App {
 
     // -- input --------------------------------------------------------------
 
-    pub fn on_key(&mut self, key: KeyEvent) {
+    /// Frontend-neutral entry point: every backend maps its native input into an
+    /// [`InputEvent`] and feeds it here.
+    pub fn on_event(&mut self, ev: InputEvent) {
+        match ev {
+            InputEvent::Key { key, mods } => self.on_key(key, mods),
+        }
+    }
+
+    fn on_key(&mut self, key: Key, mods: Mods) {
         // Ctrl+C always quits.
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        if mods.ctrl && key == Key::Char('c') {
             self.should_quit = true;
             return;
         }
         match self.screen {
             Screen::Startup => self.on_startup_key(key),
-            Screen::Menu => self.on_menu_key(key),
+            Screen::Menu => self.on_menu_key(key, mods),
             Screen::Settings => self.on_settings_key(key),
             Screen::Stats => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                if matches!(key, Key::Esc | Key::Enter) {
                     self.screen = Screen::Menu;
                 }
             }
-            Screen::Teacher => self.on_teacher_key(key),
+            Screen::Teacher => self.on_teacher_key(key, mods),
             Screen::Cinematic => {
                 // Any key skips the celebration and resumes the lesson.
                 if let Some(c) = self.cinematic.take() {
@@ -464,11 +472,11 @@ impl App {
         }
     }
 
-    fn on_startup_key(&mut self, key: KeyEvent) {
+    fn on_startup_key(&mut self, key: Key) {
         use crate::config::GraphicsMode;
-        match key.code {
-            KeyCode::Up | KeyCode::Down => self.startup_index ^= 1,
-            KeyCode::Enter | KeyCode::Char(' ') => {
+        match key {
+            Key::Up | Key::Down => self.startup_index ^= 1,
+            Key::Enter | Key::Char(' ') => {
                 // CPU mode is shelved; only Low actually proceeds.
                 let mode = if self.startup_index == 1 { GraphicsMode::Cpu } else { GraphicsMode::Low };
                 if mode.available() {
@@ -476,35 +484,35 @@ impl App {
                     self.screen = Screen::Menu;
                 }
             }
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.should_quit = true,
+            Key::Char('q') | Key::Char('Q') | Key::Esc => self.should_quit = true,
             _ => {}
         }
     }
 
-    fn on_menu_key(&mut self, key: KeyEvent) {
+    fn on_menu_key(&mut self, key: Key, mods: Mods) {
         // Typing a new student's name captures everything until committed.
         if self.naming {
-            self.on_name_input_key(key);
+            self.on_name_input_key(key, mods);
             return;
         }
 
-        match key.code {
-            KeyCode::Up => self.menu_index = (self.menu_index + MENU_ITEMS - 1) % MENU_ITEMS,
-            KeyCode::Down => self.menu_index = (self.menu_index + 1) % MENU_ITEMS,
-            KeyCode::Left if self.menu_index == MI_STUDENT => self.roster.cycle(-1),
-            KeyCode::Right if self.menu_index == MI_STUDENT => self.roster.cycle(1),
-            KeyCode::Left if self.menu_index == MI_GRADE => {
+        match key {
+            Key::Up => self.menu_index = (self.menu_index + MENU_ITEMS - 1) % MENU_ITEMS,
+            Key::Down => self.menu_index = (self.menu_index + 1) % MENU_ITEMS,
+            Key::Left if self.menu_index == MI_STUDENT => self.roster.cycle(-1),
+            Key::Right if self.menu_index == MI_STUDENT => self.roster.cycle(1),
+            Key::Left if self.menu_index == MI_GRADE => {
                 self.menu_grade = self.menu_grade.saturating_sub(1);
             }
-            KeyCode::Right if self.menu_index == MI_GRADE => {
+            Key::Right if self.menu_index == MI_GRADE => {
                 self.menu_grade = (self.menu_grade + 1).min(8);
             }
             // N adds a new student from anywhere on the menu.
-            KeyCode::Char('n') | KeyCode::Char('N') => {
+            Key::Char('n') | Key::Char('N') => {
                 self.naming = true;
                 self.name_input.clear();
             }
-            KeyCode::Char(' ') | KeyCode::Enter => match self.menu_index {
+            Key::Char(' ') | Key::Enter => match self.menu_index {
                 i if MI_OPS.contains(&i) => {
                     let op = i - *MI_OPS.start();
                     self.menu_ops[op] = !self.menu_ops[op];
@@ -526,19 +534,19 @@ impl App {
                 MI_EXPERIMENT => self.screen = Screen::Experiment,
                 _ => {}
             },
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.should_quit = true,
+            Key::Char('q') | Key::Char('Q') | Key::Esc => self.should_quit = true,
             _ => {}
         }
     }
 
     /// Handle a keystroke while typing a new student's name.
-    fn on_name_input_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
+    fn on_name_input_key(&mut self, key: Key, mods: Mods) {
+        match key {
+            Key::Esc => {
                 self.naming = false;
                 self.name_input.clear();
             }
-            KeyCode::Enter => {
+            Key::Enter => {
                 if !self.name_input.trim().is_empty() {
                     self.roster.add(&self.name_input);
                     self.roster.save();
@@ -546,10 +554,10 @@ impl App {
                 self.naming = false;
                 self.name_input.clear();
             }
-            KeyCode::Backspace => {
+            Key::Backspace => {
                 self.name_input.pop();
             }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Key::Char(c) if !mods.ctrl => {
                 if self.name_input.chars().count() < 20 {
                     self.name_input.push(c);
                 }
@@ -576,29 +584,29 @@ impl App {
         self.teacher_msg = None;
     }
 
-    fn on_teacher_key(&mut self, key: KeyEvent) {
+    fn on_teacher_key(&mut self, key: Key, mods: Mods) {
         if !self.teacher_authed {
-            self.on_teacher_login_key(key);
+            self.on_teacher_login_key(key, mods);
         } else if self.teacher_adding {
-            self.on_teacher_add_key(key);
+            self.on_teacher_add_key(key, mods);
         } else {
             self.on_teacher_manage_key(key);
         }
     }
 
     /// Setting (first visit) or entering the teacher password.
-    fn on_teacher_login_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.screen = Screen::Menu,
-            KeyCode::Backspace => {
+    fn on_teacher_login_key(&mut self, key: Key, mods: Mods) {
+        match key {
+            Key::Esc => self.screen = Screen::Menu,
+            Key::Backspace => {
                 self.teacher_pw.pop();
             }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Key::Char(c) if !mods.ctrl => {
                 if self.teacher_pw.chars().count() < 32 {
                     self.teacher_pw.push(c);
                 }
             }
-            KeyCode::Enter => {
+            Key::Enter => {
                 if self.config.has_teacher_password() {
                     if self.config.verify_teacher_password(&self.teacher_pw) {
                         self.teacher_authed = true;
@@ -621,21 +629,21 @@ impl App {
     }
 
     /// Typing a new anecdote for the selected operation.
-    fn on_teacher_add_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
+    fn on_teacher_add_key(&mut self, key: Key, mods: Mods) {
+        match key {
+            Key::Esc => {
                 self.teacher_adding = false;
                 self.teacher_text.clear();
             }
-            KeyCode::Backspace => {
+            Key::Backspace => {
                 self.teacher_text.pop();
             }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Key::Char(c) if !mods.ctrl => {
                 if self.teacher_text.chars().count() < ANECDOTE_MAX {
                     self.teacher_text.push(c);
                 }
             }
-            KeyCode::Enter => {
+            Key::Enter => {
                 let topic = Topic::ALL[self.teacher_topic];
                 if !self.teacher_text.trim().is_empty() {
                     self.why_extras.add(topic, &self.teacher_text);
@@ -651,13 +659,13 @@ impl App {
 
     /// Browsing tools once authenticated.  Tab switches between editing the
     /// "Why?" anecdotes and administering student records.
-    fn on_teacher_manage_key(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Esc {
+    fn on_teacher_manage_key(&mut self, key: Key) {
+        if key == Key::Esc {
             self.teacher_authed = false;
             self.screen = Screen::Menu;
             return;
         }
-        if key.code == KeyCode::Tab {
+        if key == Key::Tab {
             self.teacher_view = match self.teacher_view {
                 TeacherView::Anecdotes => TeacherView::Records,
                 TeacherView::Records => TeacherView::Anecdotes,
@@ -666,16 +674,16 @@ impl App {
             return;
         }
         // L cycles the measurement locality (used by Units of Measure).
-        if matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')) {
+        if matches!(key, Key::Char('l') | Key::Char('L')) {
             self.cycle_locality(true);
             self.teacher_msg = Some(format!("Units locality: {}", self.config.locality.name()));
             return;
         }
         match self.teacher_view {
-            TeacherView::Anecdotes => match key.code {
-                KeyCode::Left => self.teacher_topic = (self.teacher_topic + Topic::ALL.len() - 1) % Topic::ALL.len(),
-                KeyCode::Right => self.teacher_topic = (self.teacher_topic + 1) % Topic::ALL.len(),
-                KeyCode::Char('a') | KeyCode::Char('A') => {
+            TeacherView::Anecdotes => match key {
+                Key::Left => self.teacher_topic = (self.teacher_topic + Topic::ALL.len() - 1) % Topic::ALL.len(),
+                Key::Right => self.teacher_topic = (self.teacher_topic + 1) % Topic::ALL.len(),
+                Key::Char('a') | Key::Char('A') => {
                     self.teacher_adding = true;
                     self.teacher_text.clear();
                     self.teacher_msg = None;
@@ -687,16 +695,16 @@ impl App {
     }
 
     /// Reset or remove student progress records.
-    fn on_teacher_records_key(&mut self, key: KeyEvent) {
+    fn on_teacher_records_key(&mut self, key: Key) {
         let n = self.roster.students.len();
         self.teacher_rec_index = self.teacher_rec_index.min(n - 1);
-        match key.code {
-            KeyCode::Up => self.teacher_rec_index = (self.teacher_rec_index + n - 1) % n,
-            KeyCode::Down => self.teacher_rec_index = (self.teacher_rec_index + 1) % n,
-            KeyCode::Left => self.teacher_topic = (self.teacher_topic + Topic::ALL.len() - 1) % Topic::ALL.len(),
-            KeyCode::Right => self.teacher_topic = (self.teacher_topic + 1) % Topic::ALL.len(),
+        match key {
+            Key::Up => self.teacher_rec_index = (self.teacher_rec_index + n - 1) % n,
+            Key::Down => self.teacher_rec_index = (self.teacher_rec_index + 1) % n,
+            Key::Left => self.teacher_topic = (self.teacher_topic + Topic::ALL.len() - 1) % Topic::ALL.len(),
+            Key::Right => self.teacher_topic = (self.teacher_topic + 1) % Topic::ALL.len(),
             // S: reset just the selected topic's count for this student.
-            KeyCode::Char('s') | KeyCode::Char('S') => {
+            Key::Char('s') | Key::Char('S') => {
                 let topic = Topic::ALL[self.teacher_topic];
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.students[self.teacher_rec_index].reset_topic(topic);
@@ -704,14 +712,14 @@ impl App {
                 self.teacher_msg = Some(format!("Reset {} for {}.", topic.name(), name));
             }
             // R: reset all of this student's records.
-            KeyCode::Char('r') | KeyCode::Char('R') => {
+            Key::Char('r') | Key::Char('R') => {
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.students[self.teacher_rec_index].reset();
                 self.roster.save();
                 self.teacher_msg = Some(format!("Reset all records for {}.", name));
             }
             // X: remove the student entirely (a Guest is kept if it's the last).
-            KeyCode::Char('x') | KeyCode::Char('X') => {
+            Key::Char('x') | Key::Char('X') => {
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.remove(self.teacher_rec_index);
                 self.teacher_rec_index = self.teacher_rec_index.min(self.roster.students.len() - 1);
@@ -719,12 +727,12 @@ impl App {
                 self.teacher_msg = Some(format!("Removed {}.", name));
             }
             // + / - : adjust this student's reveal limit (0 = never lock, max 9).
-            KeyCode::Char('+') | KeyCode::Char('=') => {
+            Key::Char('+') | Key::Char('=') => {
                 let s = &mut self.roster.students[self.teacher_rec_index];
                 s.reveal_lock = (s.reveal_lock + 1).min(9);
                 self.roster.save();
             }
-            KeyCode::Char('-') | KeyCode::Char('_') => {
+            Key::Char('-') | Key::Char('_') => {
                 let s = &mut self.roster.students[self.teacher_rec_index];
                 s.reveal_lock = s.reveal_lock.saturating_sub(1);
                 self.roster.save();
@@ -733,13 +741,13 @@ impl App {
         }
     }
 
-    fn on_settings_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Up => self.settings_field = (self.settings_field + ui::SETTINGS_FIELDS - 1) % ui::SETTINGS_FIELDS,
-            KeyCode::Down => self.settings_field = (self.settings_field + 1) % ui::SETTINGS_FIELDS,
-            KeyCode::Left => self.adjust_setting(false),
-            KeyCode::Right => self.adjust_setting(true),
-            KeyCode::Esc | KeyCode::Enter => {
+    fn on_settings_key(&mut self, key: Key) {
+        match key {
+            Key::Up => self.settings_field = (self.settings_field + ui::SETTINGS_FIELDS - 1) % ui::SETTINGS_FIELDS,
+            Key::Down => self.settings_field = (self.settings_field + 1) % ui::SETTINGS_FIELDS,
+            Key::Left => self.adjust_setting(false),
+            Key::Right => self.adjust_setting(true),
+            Key::Esc | Key::Enter => {
                 // Save and return to the menu.
                 self.config.save();
                 self.screen = Screen::Menu;
@@ -771,9 +779,9 @@ impl App {
         }
     }
 
-    fn on_session_key(&mut self, key: KeyEvent) {
+    fn on_session_key(&mut self, key: Key) {
         // Esc peels back one overlay at a time, then returns to the menu.
-        if key.code == KeyCode::Esc {
+        if key == Key::Esc {
             if self.why_active {
                 self.why_active = false;
             } else if self.help_active {
@@ -786,7 +794,7 @@ impl App {
 
         // The help duck (H) and answer reveal (R) work for every problem —
         // arithmetic shows strategies, measurement shows a how-to hint.
-        if matches!(key.code, KeyCode::Char('h') | KeyCode::Char('H')) {
+        if matches!(key, Key::Char('h') | Key::Char('H')) {
             self.help_active = !self.help_active;
             if self.help_active {
                 self.why_active = false;
@@ -795,14 +803,14 @@ impl App {
             }
             return;
         }
-        if self.help_active && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R')) {
+        if self.help_active && matches!(key, Key::Char('r') | Key::Char('R')) {
             self.reveal_answer();
             return;
         }
 
         // The Why panel works for every section — each topic carries its own
         // real-world uses and teacher anecdotes.
-        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+        if matches!(key, Key::Char('y') | Key::Char('Y')) {
             self.why_active = !self.why_active;
             if self.why_active {
                 self.help_active = false;
@@ -812,8 +820,8 @@ impl App {
         }
 
         // While the Why panel is open, Up/Down scroll long lists.
-        if self.why_active && matches!(key.code, KeyCode::Up | KeyCode::Down) {
-            if key.code == KeyCode::Up {
+        if self.why_active && matches!(key, Key::Up | Key::Down) {
+            if key == Key::Up {
                 self.why_scroll = self.why_scroll.saturating_sub(1);
             } else {
                 self.why_scroll = (self.why_scroll + 1).min(self.why_max_scroll.get());
@@ -825,14 +833,14 @@ impl App {
         // strategies (arithmetic); the others just take an answer + a hint.
         if self.current.has_strategies() {
             // While the duck is out, Space cycles to another strategy.
-            if self.help_active && key.code == KeyCode::Char(' ') {
+            if self.help_active && key == Key::Char(' ') {
                 self.strategy_index = self.strategy_index.wrapping_add(1);
                 self.revealed = false;
                 return;
             }
 
             // V switches the problem layout live.
-            if matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V')) {
+            if matches!(key, Key::Char('v') | Key::Char('V')) {
                 self.config.layout = self.config.layout.toggled();
                 return;
             }
@@ -840,7 +848,7 @@ impl App {
 
         // Finished challenge: Enter starts a fresh run.
         if self.challenge.as_ref().map_or(false, |c| c.finished) {
-            if key.code == KeyCode::Enter {
+            if key == Key::Enter {
                 self.start_session(true);
             }
             return;
@@ -851,8 +859,8 @@ impl App {
             return;
         }
 
-        match key.code {
-            KeyCode::Char(d @ '0'..='9') => {
+        match key {
+            Key::Char(d @ '0'..='9') => {
                 if self.feedback == Feedback::Wrong {
                     self.input.clear();
                 }
@@ -861,23 +869,23 @@ impl App {
                     self.input.push(d);
                 }
             }
-            KeyCode::Char('-') if self.current.accepts_minus() => {
+            Key::Char('-') if self.current.accepts_minus() => {
                 // Leading minus only (for grades that allow negative answers).
                 if self.input.is_empty() {
                     self.input.push('-');
                 }
             }
             // Fractions are entered as "a/b".
-            KeyCode::Char('/') if self.current.accepts_slash() => {
+            Key::Char('/') if self.current.accepts_slash() => {
                 if !self.input.is_empty() && !self.input.contains('/') {
                     self.input.push('/');
                 }
             }
-            KeyCode::Backspace => {
+            Key::Backspace => {
                 self.feedback = Feedback::None;
                 self.input.pop();
             }
-            KeyCode::Enter => self.check_answer(),
+            Key::Enter => self.check_answer(),
             _ => {}
         }
     }
@@ -1128,27 +1136,27 @@ impl App {
         crate::units::Category::ALL[self.exp_category].units().len()
     }
 
-    fn on_experiment_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.to_menu(),
-            KeyCode::Up => self.exp_field = (self.exp_field + EXP_FIELDS - 1) % EXP_FIELDS,
-            KeyCode::Down => self.exp_field = (self.exp_field + 1) % EXP_FIELDS,
-            KeyCode::Left | KeyCode::Right => {
-                let fwd = key.code == KeyCode::Right;
+    fn on_experiment_key(&mut self, key: Key) {
+        match key {
+            Key::Esc => self.to_menu(),
+            Key::Up => self.exp_field = (self.exp_field + EXP_FIELDS - 1) % EXP_FIELDS,
+            Key::Down => self.exp_field = (self.exp_field + 1) % EXP_FIELDS,
+            Key::Left | Key::Right => {
+                let fwd = key == Key::Right;
                 self.adjust_experiment(fwd);
             }
             // Digits and a single decimal point edit the amount from any field.
-            KeyCode::Char(c @ '0'..='9') => {
+            Key::Char(c @ '0'..='9') => {
                 if self.exp_amount.chars().count() < 12 {
                     self.exp_amount.push(c);
                 }
             }
-            KeyCode::Char('.') => {
+            Key::Char('.') => {
                 if !self.exp_amount.contains('.') && self.exp_amount.chars().count() < 12 {
                     self.exp_amount.push('.');
                 }
             }
-            KeyCode::Backspace => {
+            Key::Backspace => {
                 self.exp_amount.pop();
             }
             _ => {}

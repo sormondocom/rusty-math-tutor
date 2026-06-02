@@ -251,10 +251,10 @@ fn unit_problem_help_renders() {
     app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Units);
     // Pressing H opens the duck; R reveals the answer.
-    use crossterm::event::{KeyCode, KeyEvent};
-    app.on_key(KeyEvent::from(KeyCode::Char('h')));
+    use crate::input::{InputEvent, Key};
+    app.on_event(InputEvent::key(Key::Char('h')));
     assert!(app.help_active, "H should summon the duck on a unit problem");
-    app.on_key(KeyEvent::from(KeyCode::Char('r')));
+    app.on_event(InputEvent::key(Key::Char('r')));
     assert!(app.revealed);
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     for _ in 0..6 {
@@ -299,7 +299,7 @@ fn peeking_too_much_locks_the_answer_with_reprimands() {
 
 #[test]
 fn reveal_lock_is_per_student_and_can_be_disabled() {
-    use crossterm::event::{KeyCode, KeyEvent};
+    use crate::input::{InputEvent, Key};
     let mut app = App::new(Config::default());
     // Use a clean single-student roster (tests share the on-disk one).
     app.roster = crate::student::Roster::default();
@@ -310,10 +310,10 @@ fn reveal_lock_is_per_student_and_can_be_disabled() {
     app.teacher_view = TeacherView::Records;
     app.teacher_rec_index = 0;
     let start = app.roster.students[0].reveal_lock;
-    app.on_key(KeyEvent::from(KeyCode::Char('+')));
+    app.on_event(InputEvent::key(Key::Char('+')));
     assert_eq!(app.roster.students[0].reveal_lock, start + 1);
     for _ in 0..9 {
-        app.on_key(KeyEvent::from(KeyCode::Char('-')));
+        app.on_event(InputEvent::key(Key::Char('-')));
     }
     assert_eq!(app.roster.students[0].reveal_lock, 0, "can drop to 0 (never lock)");
 
@@ -406,7 +406,7 @@ fn slash_key_types_a_fraction_answer() {
     app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Fractions);
     for c in ['2', '/', '4'] {
-        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+        app.on_event(crate::input::InputEvent::key(crate::input::Key::Char(c)));
     }
     assert_eq!(app.input, "2/4", "the '/' key should be accepted for fractions");
 }
@@ -795,18 +795,18 @@ fn explorer_converts_and_handles_outrageous_values() {
 
 #[test]
 fn experiment_keys_drive_the_explorer() {
-    use crossterm::event::{KeyCode, KeyEvent};
+    use crate::input::{InputEvent, Key};
     let mut app = App::new(Config::default());
     app.screen = Screen::Experiment;
     // Cycle to the Category field and switch category; indices stay valid.
     app.exp_field = 3;
-    app.on_key(KeyEvent::from(KeyCode::Right));
+    app.on_event(InputEvent::key(Key::Right));
     let count = crate::units::Category::ALL[app.exp_category].units().len();
     assert!(app.exp_from < count && app.exp_to < count);
     // Typing edits the amount from any field.
     app.exp_amount.clear();
     for c in ['4', '2', '.', '5'] {
-        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+        app.on_event(InputEvent::key(Key::Char(c)));
     }
     assert_eq!(app.exp_amount, "42.5");
 }

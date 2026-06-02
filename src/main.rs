@@ -16,6 +16,7 @@ mod duck;
 mod font;
 mod fraction;
 mod geometry;
+mod input;
 mod motivation;
 mod problem;
 mod section;
@@ -31,7 +32,7 @@ use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, execute};
 use ratatui::backend::CrosstermBackend;
@@ -40,6 +41,7 @@ use ratatui::Terminal;
 
 use app::App;
 use config::Config;
+use input::{InputEvent, Key, Mods};
 
 /// Target frame interval — fast enough for smooth transitions, idle-cheap.
 const TICK: Duration = Duration::from_millis(33);
@@ -67,7 +69,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == event::KeyEventKind::Press {
-                    app.on_key(key);
+                    if let Some(ev) = to_input(key) {
+                        app.on_event(ev);
+                    }
                 }
             }
         }
@@ -81,6 +85,26 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     app.config.save();
     app.roster.save();
     Ok(())
+}
+
+/// Map a crossterm key press into a frontend-neutral [`InputEvent`].  Keys the
+/// app never uses are dropped (returns `None`).  This is the terminal
+/// frontend's input adapter; GUI/web frontends provide their own.
+fn to_input(key: KeyEvent) -> Option<InputEvent> {
+    let k = match key.code {
+        KeyCode::Char(c) => Key::Char(c),
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Tab => Key::Tab,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        _ => return None,
+    };
+    let mods = Mods { ctrl: key.modifiers.contains(KeyModifiers::CONTROL) };
+    Some(InputEvent::Key { key: k, mods })
 }
 
 // ---------------------------------------------------------------------------
