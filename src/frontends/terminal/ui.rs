@@ -31,6 +31,24 @@ const STAGE_BG: Color = Color::Rgb(28, 30, 44);
 /// Background colour shared by every screen.
 const BG: Color = Color::Rgb(16, 18, 28);
 
+/// Map a domain [`crate::color::Color`] to the ratatui colour the terminal
+/// paints with.  The core describes colours renderer-neutrally; this is where
+/// the terminal frontend turns them into cells.
+fn rat(c: crate::color::Color) -> Color {
+    use crate::color::Color as C;
+    match c {
+        C::LightCyan => Color::LightCyan,
+        C::LightGreen => Color::LightGreen,
+        C::LightYellow => Color::LightYellow,
+        C::LightMagenta => Color::LightMagenta,
+        C::LightBlue => Color::LightBlue,
+        C::LightRed => Color::LightRed,
+        C::Cyan => Color::Cyan,
+        C::Green => Color::Green,
+        C::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -142,11 +160,11 @@ fn build_scene_transition(cin: &Cinematic, area: Rect, effect: Effect, rng: &mut
 pub fn render_scene(area: Rect, buf: &mut Buffer, scene: &crate::cinematic::Scene, frame: u64) {
     use crate::cinematic::SceneKind;
     Block::default().style(Style::default().bg(BG)).render(area, buf);
-    let accent = Style::default().fg(scene.accent);
+    let accent = Style::default().fg(rat(scene.accent));
 
     match scene.kind {
-        SceneKind::NameSky => render_name_sky(area, buf, &scene.heading, &scene.sub, scene.accent, frame),
-        SceneKind::RocketName => render_rocket_name(area, buf, &scene.heading, &scene.sub, scene.accent, frame),
+        SceneKind::NameSky => render_name_sky(area, buf, &scene.heading, &scene.sub, rat(scene.accent), frame),
+        SceneKind::RocketName => render_rocket_name(area, buf, &scene.heading, &scene.sub, rat(scene.accent), frame),
         SceneKind::Text => {
             if let Some(big) = &scene.big {
                 let by = (area.top() + area.height.saturating_sub(font::GLYPH_H) / 2).saturating_sub(2);
@@ -775,7 +793,7 @@ pub fn render_shape_card(area: Rect, buf: &mut Buffer, p: &crate::fraction::Frac
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(p.shaded_color))
+        .border_style(Style::default().fg(rat(p.shaded_color)))
         .title(title)
         .style(Style::default().bg(BG));
     let inner = block.inner(area);
@@ -798,7 +816,7 @@ pub fn render_shape_card(area: Rect, buf: &mut Buffer, p: &crate::fraction::Frac
         height: inner.bottom().saturating_sub(y + 1 + answer_h + 2),
     };
     if shape_area.height >= 3 {
-        crate::shapes::render(buf, shape_area, p.shape, progress, |i| p.color_of(i));
+        crate::shapes::render(buf, shape_area, p.shape, progress, |i| rat(p.color_of(i)));
     }
 
     let ay = inner.bottom().saturating_sub(answer_h + 1);
@@ -813,7 +831,7 @@ pub fn render_shape_card(area: Rect, buf: &mut Buffer, p: &crate::fraction::Frac
             };
             let bar_w = num.chars().count().max(den.chars().count()).max(1) as u16 + 2;
             put_str(buf, center(inner, num.chars().count() as u16), ay + 1, num, style);
-            put_str(buf, center(inner, bar_w), ay + 2, &"─".repeat(bar_w as usize), Style::default().fg(p.shaded_color));
+            put_str(buf, center(inner, bar_w), ay + 2, &"─".repeat(bar_w as usize), Style::default().fg(rat(p.shaded_color)));
             put_str(buf, center(inner, den.chars().count() as u16), ay + 3, den, style);
         }
         Mode::Percent => {
@@ -1755,7 +1773,7 @@ pub fn render_card(area: Rect, buf: &mut Buffer, p: &Problem, input: &str, layou
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(p.accent))
+        .border_style(Style::default().fg(rat(p.accent)))
         .style(Style::default().bg(BG));
     let inner = block.inner(area);
     block.render(area, buf);
@@ -1809,7 +1827,7 @@ fn draw_horizontal(inner: Rect, buf: &mut Buffer, p: &Problem, input: &str) {
 
     let x = center(inner, total);
     let y = inner.top() + inner.height.saturating_sub(font::GLYPH_H) / 2;
-    font::draw_text(buf, x, y, &prompt, Style::default().fg(p.accent));
+    font::draw_text(buf, x, y, &prompt, Style::default().fg(rat(p.accent)));
     font::draw_text(buf, x + pw + gap, y, answer, answer_style(input));
 }
 
@@ -1832,7 +1850,7 @@ fn draw_vertical(inner: Rect, buf: &mut Buffer, p: &Problem, input: &str) {
     let total_h = 3 * font::GLYPH_H + 3;
     let top = inner.top() + inner.height.saturating_sub(total_h) / 2;
 
-    let accent = Style::default().fg(p.accent);
+    let accent = Style::default().fg(rat(p.accent));
     let right = |buf: &mut Buffer, s: &str, y: u16, style: Style| {
         let x = field_right.saturating_sub(font::text_width(s));
         font::draw_text(buf, x, y, s, style);
@@ -1851,7 +1869,7 @@ fn draw_vertical(inner: Rect, buf: &mut Buffer, p: &Problem, input: &str) {
     let y_div = y2 + font::GLYPH_H;
     if y_div < inner.bottom() {
         for x in x0..field_right.min(inner.right()) {
-            buf[(x, y_div)].set_symbol("─").set_fg(p.accent);
+            buf[(x, y_div)].set_symbol("─").set_fg(rat(p.accent));
         }
     }
 
@@ -1886,21 +1904,21 @@ fn draw_division_house(inner: Rect, buf: &mut Buffer, p: &Problem, input: &str) 
     let roof_y = top + font::GLYPH_H;
     let dvd_y = roof_y + 1;
 
-    let accent = Style::default().fg(p.accent);
+    let accent = Style::default().fg(rat(p.accent));
 
     // Quotient (the answer) sits above the roof, over the dividend.
     font::draw_text(buf, quotient_x, q_y, &quotient, answer_style(input));
 
     // Roof: corner at the wall, bar across the dividend.
     if roof_y < inner.bottom() {
-        buf[(wall_x.min(inner.right().saturating_sub(1)), roof_y)].set_symbol("┌").set_fg(p.accent);
+        buf[(wall_x.min(inner.right().saturating_sub(1)), roof_y)].set_symbol("┌").set_fg(rat(p.accent));
         for x in (wall_x + 1)..house_right {
-            buf[(x, roof_y)].set_symbol("─").set_fg(p.accent);
+            buf[(x, roof_y)].set_symbol("─").set_fg(rat(p.accent));
         }
     }
     // Wall down the left of the dividend.
     for y in (roof_y + 1)..(dvd_y + font::GLYPH_H).min(inner.bottom()) {
-        buf[(wall_x.min(inner.right().saturating_sub(1)), y)].set_symbol("│").set_fg(p.accent);
+        buf[(wall_x.min(inner.right().saturating_sub(1)), y)].set_symbol("│").set_fg(rat(p.accent));
     }
 
     // Divisor outside the wall, dividend inside.
@@ -2044,7 +2062,7 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect, problem: &Problem) {
         return;
     }
 
-    let accent = problem.accent;
+    let accent = rat(problem.accent);
     let drawn = match &s.viz {
         Viz::NumberLine { stops, hops } => draw_number_line(buf, content, s, stops, hops, app, accent),
         Viz::Smash { value, parts } => draw_smash(buf, content, s, *value, parts, app, accent),
@@ -2277,4 +2295,5 @@ fn tail(s: &str, width: u16) -> String {
 }
 
 #[cfg(test)]
+#[path = "ui/tests.rs"]
 mod tests;

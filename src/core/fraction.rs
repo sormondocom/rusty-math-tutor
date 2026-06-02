@@ -7,7 +7,7 @@
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use ratatui::style::Color;
+use crate::color::Color;
 
 use crate::shapes::Shape;
 

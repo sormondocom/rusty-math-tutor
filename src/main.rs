@@ -9,25 +9,54 @@
 //! The whole thing is a plain synchronous poll loop over [`crossterm`] events
 //! with a fixed ~33 ms tick — deliberately lightweight for slow hardware.
 
+// Module files live under src/core/ (the frontend-agnostic domain) and
+// src/frontends/terminal/ (the crossterm + ratatui renderer).  `#[path]` keeps
+// the crate paths flat (`crate::problem`, `crate::ui`, …) so the split is purely
+// organisational.  See docs/graphics-mode.md.
+
+// --- core: the frontend-agnostic domain (no crossterm / ratatui / std::fs) ---
+#[path = "core/app.rs"]
 mod app;
+#[path = "core/cinematic.rs"]
 mod cinematic;
+#[path = "core/color.rs"]
+mod color;
+#[path = "core/config.rs"]
 mod config;
-mod duck;
-mod font;
+#[path = "core/fraction.rs"]
 mod fraction;
+#[path = "core/geometry.rs"]
 mod geometry;
+#[path = "core/input.rs"]
 mod input;
+#[path = "core/motivation.rs"]
 mod motivation;
+#[path = "core/problem.rs"]
 mod problem;
+#[path = "core/section.rs"]
 mod section;
-mod shapes;
+#[path = "core/storage.rs"]
 mod storage;
+#[path = "core/strategy.rs"]
 mod strategy;
+#[path = "core/student.rs"]
 mod student;
+#[path = "core/topic.rs"]
 mod topic;
-mod transition;
-mod ui;
+#[path = "core/units.rs"]
 mod units;
+
+// --- terminal frontend: the cell renderer + its transition visuals ---
+#[path = "frontends/terminal/duck.rs"]
+mod duck;
+#[path = "frontends/terminal/font.rs"]
+mod font;
+#[path = "frontends/terminal/shapes.rs"]
+mod shapes;
+#[path = "frontends/terminal/transition.rs"]
+mod transition;
+#[path = "frontends/terminal/ui.rs"]
+mod ui;
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;

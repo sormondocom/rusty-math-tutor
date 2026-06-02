@@ -8,7 +8,7 @@
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use ratatui::style::Color;
+use crate::color::Color;
 
 /// Totals that trigger a celebration.
 pub const MILESTONES: [u32; 6] = [7, 11, 33, 100, 123, 333];

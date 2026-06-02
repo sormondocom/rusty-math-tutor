@@ -169,16 +169,30 @@ step.
 - [x] **`app`/`config`/`student`/`motivation` no longer call `std::fs`.**
       47 tests green, no behavior change.
 
-**Step 4 — Relocate**
-- [ ] Move modules into `core/` vs `frontends/terminal/`.
-- [ ] Small follow-up: the domain still imports `ratatui::style::Color` as a
-      *data* type (accents/palettes in `fraction`/`problem`/`cinematic`).
-      Introduce a `core::Color` and convert at the frontend so the core links no
-      ratatui at all.
+**Step 4 — Relocate + finish decoupling ✅ done**
+- [x] `core::Color` (`src/core/color.rs`): a neutral colour enum.
+      `problem`/`fraction`/`cinematic` use it; the terminal frontend maps it to
+      ratatui via `ui::rat()`. **The whole domain now imports zero ratatui.**
+- [x] Moved modules into `src/core/` (15 domain modules) and
+      `src/frontends/terminal/` (5 render modules); `main.rs` keeps flat crate
+      paths via `#[path]`. 47 tests green, clean release build.
 
-Exit criteria: identical behavior, full suite green, `app` has no `crossterm`,
-`ratatui`, or `std::fs` imports. **✅ met** (the `Color` residue above is the
-only remaining ratatui *type* in the wider domain, not in `app`).
+Exit criteria: identical behavior, full suite green, the core (`app` and every
+domain module) has **no `crossterm`, `ratatui`, or `std::fs`**. **✅ met.**
+
+## Phase 0: complete
+
+All four seams are cut and the tree mirrors the split:
+
+```
+src/core/              <- domain: zero crossterm / ratatui / std::fs
+src/frontends/terminal/ <- crossterm + ratatui cell renderer + transitions
+src/main.rs            <- entry: terminal loop, InputEvent mapping, FileStorage
+```
+
+A second frontend (Phase 2 GUI, Phase 4 web) drops in beside
+`frontends/terminal/`: it feeds `App::on_event`, reads `&App` to render, and
+provides its own `Storage` — touching no core code.
 
 ### Phase 1 — Enhanced terminal (optional quick win)
 

@@ -1197,4 +1197,5 @@ fn bump(v: i64, up: bool, delta: i64, min: i64, max: i64) -> i64 {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[path = "app/tests.rs"]
 mod tests;

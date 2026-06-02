@@ -343,8 +343,8 @@ fn fractions_check_equivalent_answers() {
         total: 4,
         shaded: 2,
         shape: Shape::Grid { rows: 2, cols: 2 },
-        shaded_color: ratatui::style::Color::LightGreen,
-        other_color: ratatui::style::Color::LightBlue,
+        shaded_color: crate::color::Color::LightGreen,
+        other_color: crate::color::Color::LightBlue,
         color_name: "green",
         hint: vec![],
     };
@@ -551,7 +551,7 @@ fn sky_scene(name: &str) -> crate::cinematic::Scene {
     use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
     Scene {
         kind: SceneKind::NameSky,
-        accent: ratatui::style::Color::LightCyan,
+        accent: crate::color::Color::LightCyan,
         big: None,
         heading: name.to_string(),
         sub: "written in the stars!".to_string(),
@@ -587,7 +587,7 @@ fn rocket_scene(name: &str) -> crate::cinematic::Scene {
     use crate::cinematic::{Scene, SceneKind, ROCKET_DWELL};
     Scene {
         kind: SceneKind::RocketName,
-        accent: ratatui::style::Color::Rgb(255, 232, 150),
+        accent: crate::color::Color::Rgb(255, 232, 150),
         big: None,
         heading: name.to_string(),
         sub: "written in the stars!".to_string(),
@@ -651,7 +651,7 @@ fn name_sky_cinematic_writes_the_name_and_raises_the_moon() {
     use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
     let scene = Scene {
         kind: SceneKind::NameSky,
-        accent: ratatui::style::Color::LightCyan,
+        accent: crate::color::Color::LightCyan,
         big: None,
         heading: "Ada".to_string(),
         sub: "written in the stars!".to_string(),
@@ -680,7 +680,7 @@ fn name_sky_survives_a_cramped_sky() {
     use crate::cinematic::{Scene, SceneKind, SKY_DWELL};
     let scene = Scene {
         kind: SceneKind::NameSky,
-        accent: ratatui::style::Color::LightCyan,
+        accent: crate::color::Color::LightCyan,
         big: None,
         heading: "Zo".to_string(),
         sub: "written in the stars!".to_string(),
@@ -1061,7 +1061,7 @@ fn arithmetic_keeps_a_visual_number_line() {
     ];
     for (a, b, op) in cases {
         let answer = if op == Op::Add { a + b } else { a - b };
-        let p = problem::Problem { a, b, op, answer, accent: ratatui::style::Color::White };
+        let p = problem::Problem { a, b, op, answer, accent: crate::color::Color::LightCyan };
         let mut found = false;
         for s in strategies(&p) {
             if let Viz::NumberLine { stops, hops } = &s.viz {
