@@ -146,11 +146,19 @@ step.
 - [x] `App::on_event(InputEvent)`; `app` no longer imports `crossterm`.
       47 tests green, zero behavior change.
 
-**Step 2 — Render seam — _next_**
-- [ ] `Renderer` trait + logical primitives; terminal impl wraps `ui.rs` /
-      `shapes.rs` / `font.rs`.
-- [ ] `App::render(&mut dyn Renderer)`; `main.rs` drives it. Transitions move to
-      the terminal frontend.
+**Step 2 — Render seam ✅ done** _(reshaped after reading the code)_
+- The code revealed the core *already* doesn't drive rendering (the frontend
+  reads `&App`), and a shared low-level `Renderer` trait is the wrong tool —
+  terminal cell-art and pixel-art genuinely diverge. The real coupling was the
+  **transition machinery** (it lifts block-font `Cell`s off ratatui `Buffer`s).
+- [x] Split it: the core keeps a ratatui-free **`TransitionPhase`**
+      (`{ effect, progress }`) — timing + gating only — and the terminal
+      frontend owns the visual `Transition` (captured buffers + particles).
+- [x] Frontend `ui::Transitions` builds/syncs/drops the visuals each frame from
+      the core's phase (`Transitions::sync`); `capture_*` moved out of the core.
+- [x] Same treatment for the cinematic scene-to-scene transitions.
+- [x] **`app` now has zero `ratatui` (and `crossterm`) imports.** 47 tests green,
+      no behavior change, clean release build.
 
 **Step 3 — Storage seam**
 - [ ] `Storage` trait; terminal = filesystem (`config::data_path`), web =
@@ -246,3 +254,11 @@ _Decision log_
 - **Transitions:** owned per-frontend, not core.
 - **Phase 0 step 1 (input seam): done** — `InputEvent`/`Key`/`Mods`; `app` is
   off `crossterm`; crossterm now lives only in the terminal frontend (main.rs).
+- **Phase 0 step 2 (render seam): done** — the only core↔ratatui coupling was the
+  transition machinery; split into a core `TransitionPhase` (timing) + a
+  frontend-owned visual `Transition`. **`app` is now ratatui- and
+  crossterm-free.** No shared low-level `Renderer` trait — terminal vs pixel art
+  diverge, so each frontend renders `&App` its own way.
+- **Revised plan:** a shared semantic `Renderer`/`Scene` is *not* pursued; the
+  GUI frontend (Phase 2) will read `&App` and render pixels independently, the
+  way `ui.rs` reads `&App` and renders cells.

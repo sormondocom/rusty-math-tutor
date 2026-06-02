@@ -1,8 +1,18 @@
 use super::*;
-use crate::{motivation, strategy};
 use crate::transition::{Effect, Transition};
+use crate::{motivation, strategy, ui};
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
+
+/// Render the app once into a test terminal.  Transitions are owned by the
+/// frontend now, so the visual state stays empty here (the current card draws);
+/// transition rendering itself is covered by `all_transitions_play_safely`.
+fn draw_app(term: &mut Terminal<TestBackend>, app: &App) {
+    let fx = ui::Transitions::default();
+    term.draw(|f| ui::draw(f, app, &fx)).unwrap();
+}
 
 /// Render every screen at several sizes (including cramped ones) to prove
 /// the direct buffer writes in font/duck/transition stay in bounds.
@@ -11,39 +21,38 @@ fn rendering_never_panics() {
     for (w, h) in [(80, 24), (120, 40), (30, 12), (40, 10)] {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         let mut app = App::new(Config::default());
-        app.set_area(Rect::new(0, 0, w, h));
 
         // Startup, menu (with name prompt), settings, stats.
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.screen = Screen::Menu;
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.naming = true;
         app.name_input = "Ada".to_string();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.naming = false;
         app.open_settings();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.screen = Screen::Stats;
         app.roster.current_mut().solved = [12, 7, 4, 3];
         app.roster.current_mut().best_streak = 9;
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
 
         // Teacher area: login, then both manage views (adding + records).
         app.open_teacher();
         app.teacher_pw = "pw".to_string();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.teacher_authed = true;
         app.teacher_view = TeacherView::Anecdotes;
         app.teacher_adding = true;
         // A long anecdote exercises the wrapping input box and overflow.
         app.teacher_text = "x".repeat(ANECDOTE_MAX);
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.teacher_text = "When I tiled my kitchen floor".to_string();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.teacher_adding = false;
         app.teacher_view = TeacherView::Records;
         app.teacher_msg = Some("Reset all records for Ada.".to_string());
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.screen = Screen::Menu;
 
         // Practice in both layouts: cycle every strategy (each Viz), with
@@ -53,8 +62,7 @@ fn rendering_never_panics() {
             for &op in &Op::ALL {
                 app.menu_ops = [op == Op::Add, op == Op::Sub, op == Op::Mul, op == Op::Div];
                 app.start_session(false);
-                app.set_area(Rect::new(0, 0, w, h));
-                app.help_active = true;
+                        app.help_active = true;
                 app.encourage = Some("Don't worry — mistakes help you grow!".to_string());
                 for _ in 0..10 {
                     app.on_tick();
@@ -65,7 +73,7 @@ fn rendering_never_panics() {
                         app.revealed = rev;
                         for frame in 0..4 {
                             app.anim_frame = frame * 5;
-                            term.draw(|f| ui::draw(f, &app)).unwrap();
+                            draw_app(&mut term, &app);
                         }
                     }
                 }
@@ -73,33 +81,31 @@ fn rendering_never_panics() {
                 app.help_active = false;
                 app.why_active = true;
                 app.refresh_why_items();
-                term.draw(|f| ui::draw(f, &app)).unwrap();
+                draw_app(&mut term, &app);
                 app.why_active = false;
             }
             app.feedback = Feedback::Wrong;
-            term.draw(|f| ui::draw(f, &app)).unwrap();
+            draw_app(&mut term, &app);
         }
 
         // Challenge HUD + summary.
         app.start_session(true);
-        app.set_area(Rect::new(0, 0, w, h));
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         if let Some(c) = &mut app.challenge {
             c.finished = true;
         }
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
 
         // Units-only session (the Units checkbox on, no ops), sweeping the
         // duck-gag animation phases.
         app.menu_ops = [false, false, false, false];
         app.menu_units = true;
         app.start_session(false);
-        app.set_area(Rect::new(0, 0, w, h));
         assert!(app.current_topic() == crate::topic::Topic::Units, "units-only session should show a unit problem");
         app.input = "8".to_string();
         for frame in [5u64, 45, 60, 90] {
             app.anim_frame = frame;
-            term.draw(|f| ui::draw(f, &app)).unwrap();
+            draw_app(&mut term, &app);
         }
         app.menu_units = false;
 
@@ -108,7 +114,7 @@ fn rendering_never_panics() {
         for amount in ["3", "300", "8000"] {
             app.exp_amount = amount.to_string();
             app.anim_frame = app.anim_frame.wrapping_add(7);
-            term.draw(|f| ui::draw(f, &app)).unwrap();
+            draw_app(&mut term, &app);
         }
 
         // Fractions-only session: sweep the materialise animation + help duck.
@@ -116,13 +122,12 @@ fn rendering_never_panics() {
         app.menu_units = false;
         app.menu_fractions = true;
         app.start_session(false);
-        app.set_area(Rect::new(0, 0, w, h));
         app.input = "1/2".to_string();
         app.help_active = true;
         for frame in [0u32, 6, 20, 80] {
             app.frac_anim = frame;
             app.help_in = 1.0;
-            term.draw(|f| ui::draw(f, &app)).unwrap();
+            draw_app(&mut term, &app);
         }
         app.menu_fractions = false;
 
@@ -130,7 +135,7 @@ fn rendering_never_panics() {
         app.open_teacher();
         app.teacher_authed = true;
         app.teacher_view = TeacherView::Records;
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
     }
 }
 
@@ -149,11 +154,10 @@ fn all_transitions_play_safely() {
             ui::render_card(area, &mut from, &p1, "12", crate::config::Layout::Horizontal, None);
             ui::render_card(area, &mut to, &p2, "", crate::config::Layout::Horizontal, None);
             let mut t = Transition::with_effect(effect, from, to, &mut rng);
-            loop {
+            // Drive it the way the frontend does: set progress 0→1 each frame.
+            for step in 0..=48 {
+                t.set_progress(step as f32 / 48.0);
                 term.draw(|f| t.render(area, f.buffer_mut())).unwrap();
-                if t.advance() {
-                    break;
-                }
             }
         }
     }
@@ -205,13 +209,13 @@ fn why_panel_fits_when_tall_and_scrolls_when_short() {
     // Plenty of height: everything fits, nothing scrolls.
     let app = make();
     let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
-    term.draw(|f| ui::draw(f, &app)).unwrap();
+    draw_app(&mut term, &app);
     assert_eq!(app.why_max_scroll.get(), 0, "tall panel should not need scrolling");
 
     // Cramped height: the overflow becomes scrollable.
     let app = make();
     let mut term = Terminal::new(TestBackend::new(80, 13)).unwrap();
-    term.draw(|f| ui::draw(f, &app)).unwrap();
+    draw_app(&mut term, &app);
     assert!(app.why_max_scroll.get() > 0, "short panel should scroll");
 }
 
@@ -224,7 +228,7 @@ fn menu_duck_renders_across_cycle_without_panic() {
         app.screen = Screen::Menu;
         for frame in (0u64..2600).step_by(13) {
             app.anim_frame = frame;
-            term.draw(|f| ui::draw(f, &app)).unwrap();
+            draw_app(&mut term, &app);
         }
     }
 }
@@ -248,7 +252,6 @@ fn unit_problem_help_renders() {
     app.menu_ops = [false, false, false, false];
     app.menu_units = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Units);
     // Pressing H opens the duck; R reveals the answer.
     use crate::input::{InputEvent, Key};
@@ -259,7 +262,7 @@ fn unit_problem_help_renders() {
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     for _ in 0..6 {
         app.on_tick();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
     }
 }
 
@@ -269,7 +272,6 @@ fn peeking_too_much_locks_the_answer_with_reprimands() {
     app.roster = crate::student::Roster::default();
     app.menu_ops = [true, false, false, false];
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     app.help_active = true;
 
     // Reveal then hide, up to the student's limit — each reveal spends a peek.
@@ -374,7 +376,6 @@ fn fractions_mix_into_a_session_and_advance() {
     app.menu_ops = [false, false, false, false];
     app.menu_fractions = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Fractions, "fractions-only session shows a fraction");
 
     app.input = app.current.correct_answer_string();
@@ -384,7 +385,7 @@ fn fractions_mix_into_a_session_and_advance() {
 
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     for _ in 0..60 {
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.on_tick();
         if app.transition.is_none() {
             break;
@@ -403,7 +404,6 @@ fn slash_key_types_a_fraction_answer() {
     app.menu_ops = [false, false, false, false];
     app.menu_fractions = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Fractions);
     for c in ['2', '/', '4'] {
         app.on_event(crate::input::InputEvent::key(crate::input::Key::Char(c)));
@@ -432,9 +432,8 @@ fn title_screens_feature_deduction_duck() {
         let mut app = App::new(Config::default());
         app.roster = crate::student::Roster::default();
         app.screen = screen;
-        app.set_area(Rect::new(0, 0, 70, 22));
         let mut term = Terminal::new(TestBackend::new(70, 22)).unwrap();
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         let text = buffer_to_string(term.backend().buffer());
         assert!(text.contains("Featuring:  Deduction Duck"), "{screen:?} should feature Deduction Duck");
     }
@@ -482,7 +481,6 @@ fn geometry_mixes_into_a_session_and_records() {
     app.menu_ops = [false, false, false, false];
     app.menu_geometry = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert_eq!(app.current_topic(), crate::topic::Topic::Geometry);
 
     app.input = app.current.correct_answer_string();
@@ -707,10 +705,9 @@ fn teacher_records_show_every_section_score() {
     app.screen = Screen::Teacher;
     app.teacher_authed = true;
     app.teacher_view = TeacherView::Records;
-    app.set_area(Rect::new(0, 0, 80, 24));
 
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
-    term.draw(|f| ui::draw(f, &app)).unwrap();
+    draw_app(&mut term, &app);
     let text = buffer_to_string(term.backend().buffer());
 
     // The header carries a column for every section beyond the four ops.
@@ -832,7 +829,6 @@ fn units_checkbox_makes_a_unit_session_that_advances() {
     app.menu_ops = [false, false, false, false];
     app.menu_units = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert!(app.current_topic() == crate::topic::Topic::Units, "units-only session must show a unit problem");
 
     app.input = app.current.correct_answer_string();
@@ -841,7 +837,7 @@ fn units_checkbox_makes_a_unit_session_that_advances() {
 
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     for _ in 0..60 {
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.on_tick();
         if app.transition.is_none() {
             break;
@@ -858,7 +854,6 @@ fn mixed_session_can_show_both_problem_types() {
     let mut app = App::new(Config::default());
     app.menu_ops = [true, false, false, false];
     app.menu_units = true;
-    app.set_area(Rect::new(0, 0, 80, 24));
     let mut saw_unit = false;
     let mut saw_arith = false;
     for _ in 0..200 {
@@ -880,7 +875,6 @@ fn milestone_triggers_cinematic_then_resumes() {
     let mut app = App::new(Config::default());
     app.menu_ops = [true, false, false, false]; // addition only
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     // Sit at 6 solved so the next correct answer hits the 7 milestone.
     app.roster.current_mut().solved = [6, 0, 0, 0];
 
@@ -892,7 +886,7 @@ fn milestone_triggers_cinematic_then_resumes() {
     // Play it out; it must hand control back to the lesson.
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     for _ in 0..600 {
-        term.draw(|f| ui::draw(f, &app)).unwrap();
+        draw_app(&mut term, &app);
         app.on_tick();
         if app.cinematic.is_none() {
             break;
@@ -1035,7 +1029,6 @@ fn percentages_mix_into_a_session_and_record() {
     app.menu_ops = [false, false, false, false];
     app.menu_percents = true;
     app.start_session(false);
-    app.set_area(Rect::new(0, 0, 80, 24));
     assert_eq!(app.current_topic(), crate::topic::Topic::Percentages, "percentages-only session shows a percent");
 
     app.input = app.current.correct_answer_string();

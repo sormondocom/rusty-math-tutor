@@ -12,12 +12,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 use ratatui::Frame;
 
-use crate::app::{App, Feedback, Screen, TeacherView};
+use crate::app::{App, Cinematic, Feedback, Screen, TeacherView};
 use crate::config::Layout;
 use crate::duck::Pose;
 use crate::font;
 use crate::problem::{Op, Problem};
 use crate::section::Active;
+use crate::transition::{Effect, Transition};
 use crate::strategy::{Strategy, Viz};
 use crate::units::{Theme, UnitProblem};
 use crate::{duck, problem, strategy};
@@ -34,7 +35,7 @@ const BG: Color = Color::Rgb(16, 18, 28);
 // Entry point
 // ---------------------------------------------------------------------------
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &App, fx: &Transitions) {
     let area = f.area();
     // Paint the whole background first.
     Block::default()
@@ -47,10 +48,88 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::Settings => draw_settings(f, app, area),
         Screen::Stats => draw_stats(f, app, area),
         Screen::Teacher => draw_teacher(f, app, area),
-        Screen::Cinematic => draw_cinematic(f, app, area),
-        Screen::Practice | Screen::Challenge => draw_session(f, app, area),
+        Screen::Cinematic => draw_cinematic(f, app, fx, area),
+        Screen::Practice | Screen::Challenge => draw_session(f, app, fx, area),
         Screen::Experiment => draw_experiment(f, app, area),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal transition visuals
+// ---------------------------------------------------------------------------
+
+/// The terminal frontend's transition render-state.  The core ([`App`]) tracks
+/// only the timing ([`crate::transition::TransitionPhase`]); this owns the
+/// captured cell buffers and particle state that animate it.  Kept in sync with
+/// the core each frame via [`Transitions::sync`].
+#[derive(Default)]
+pub struct Transitions {
+    /// Problem-to-problem transition (Practice / Challenge).
+    problem: Option<Transition>,
+    /// Scene-to-scene transition (milestone cinematics).
+    scene: Option<Transition>,
+}
+
+impl Transitions {
+    /// Reconcile the visuals with the core's phases: build one when a transition
+    /// starts, drive its progress while it plays, and drop it when it ends.
+    pub fn sync(&mut self, app: &App, area: Rect, rng: &mut impl rand::Rng) {
+        match (&app.transition, &mut self.problem) {
+            (Some(phase), Some(t)) => t.set_progress(phase.progress),
+            (Some(phase), slot @ None) => *slot = Some(build_problem_transition(app, area, phase.effect, rng)),
+            (None, slot) => *slot = None,
+        }
+
+        let scene_phase = app.cinematic.as_ref().and_then(|c| c.transition);
+        match (scene_phase, &mut self.scene) {
+            (Some(phase), Some(t)) => t.set_progress(phase.progress),
+            (Some(phase), slot @ None) => {
+                let cin = app.cinematic.as_ref().expect("scene phase implies a cinematic");
+                *slot = Some(build_scene_transition(cin, area, phase.effect, rng));
+            }
+            (None, slot) => *slot = None,
+        }
+    }
+}
+
+/// Render a single section's card into a fresh buffer (for transition capture).
+fn capture_card(area: Rect, active: &Active, input: &str, progress: f32, layout: Layout, banner: Option<(String, Color)>) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    match active {
+        Active::Shape(s) => render_shape_card(area, &mut buf, s, input, progress, banner),
+        Active::Unit(u) => render_unit_card(area, &mut buf, u, input, banner),
+        Active::Geo(g) => render_geometry_card(area, &mut buf, g, input, banner),
+        Active::Arith(p) => render_card(area, &mut buf, p, input, layout, banner),
+    }
+    buf
+}
+
+/// Build the visual for a problem-to-problem transition: the answered card
+/// (with its ✓ banner) melting into the next card.
+fn build_problem_transition(app: &App, area: Rect, effect: Effect, rng: &mut impl rand::Rng) -> Transition {
+    let card = card_area(app.screen, area);
+    let from = capture_card(card, &app.current, &app.input, 1.0, app.config.layout, Some(("✓  Correct!".to_string(), Color::LightGreen)));
+    let to = match &app.pending {
+        // Capture the next card at progress 0 so a shape materialises live after.
+        Some(p) => capture_card(card, p, "", 0.0, app.config.layout, None),
+        None => Buffer::empty(card),
+    };
+    Transition::with_effect(effect, from, to, rng)
+}
+
+/// Render a cinematic scene into a fresh buffer, frozen at `frame` ticks.
+fn capture_scene(area: Rect, scene: &crate::cinematic::Scene, frame: u64) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    render_scene(area, &mut buf, scene, frame);
+    buf
+}
+
+/// Build the visual for a scene-to-scene cinematic transition: the current scene
+/// (settled) crossfading into the next (at its start frame).
+fn build_scene_transition(cin: &Cinematic, area: Rect, effect: Effect, rng: &mut impl rand::Rng) -> Transition {
+    let from = capture_scene(area, &cin.scenes[cin.index], cin.scenes[cin.index].dwell as u64);
+    let to = capture_scene(area, &cin.scenes[cin.index + 1], 0);
+    Transition::with_effect(effect, from, to, rng)
 }
 
 // ---------------------------------------------------------------------------
@@ -277,12 +356,13 @@ fn render_rocket_name(area: Rect, buf: &mut Buffer, name: &str, sub: &str, accen
     draw_awe_duck(buf, area, frame);
 }
 
-fn draw_cinematic(f: &mut Frame, app: &App, area: Rect) {
+fn draw_cinematic(f: &mut Frame, app: &App, fx: &Transitions, area: Rect) {
     let buf = f.buffer_mut();
-    if let Some(c) = &app.cinematic {
-        if let Some(t) = &c.transition {
-            t.render(area, buf);
-        } else if let Some(scene) = c.scenes.get(c.index) {
+    if let Some(t) = &fx.scene {
+        // A scene-to-scene transition is playing (owned by the frontend).
+        t.render(area, buf);
+    } else if let Some(c) = &app.cinematic {
+        if let Some(scene) = c.scenes.get(c.index) {
             // Elapsed ticks into this scene (dwell counts down from scene.dwell).
             let frame = scene.dwell.saturating_sub(c.dwell) as u64;
             render_scene(area, buf, scene, frame);
@@ -1312,8 +1392,7 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
 // Settings — per-grade number ranges
 // ---------------------------------------------------------------------------
 
-/// Number of editable rows on the Settings screen (grade + four range knobs).
-pub const SETTINGS_FIELDS: usize = 5;
+use crate::app::SETTINGS_FIELDS;
 
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
@@ -1370,7 +1449,7 @@ pub fn card_area(screen: Screen, area: Rect) -> Rect {
     }
 }
 
-fn draw_session(f: &mut Frame, app: &App, area: Rect) {
+fn draw_session(f: &mut Frame, app: &App, fx: &Transitions, area: Rect) {
     // Reserve a HUD row at the top for challenge mode.
     let card_area = card_area(app.screen, area);
     if app.screen == Screen::Challenge {
@@ -1378,9 +1457,9 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
         draw_challenge_hud(f, app, hud);
     }
 
-    // Card: either an in-flight transition or the current problem, dispatched on
-    // whichever section produced it.
-    if let Some(t) = &app.transition {
+    // Card: either an in-flight transition (owned by the frontend) or the
+    // current problem, dispatched on whichever section produced it.
+    if let Some(t) = &fx.problem {
         t.render(card_area, f.buffer_mut());
     } else if app.challenge.as_ref().map_or(false, |c| c.finished) {
         draw_challenge_summary(f, app, card_area);

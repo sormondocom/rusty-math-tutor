@@ -56,13 +56,17 @@ fn main() -> Result<()> {
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut app = App::new(Config::load());
     let mut last_tick = Instant::now();
+    // Terminal-frontend render state: the captured pixels for any in-flight
+    // transition, kept in step with the core's timing each frame.
+    let mut fx = ui::Transitions::default();
+    let mut rng = rand::thread_rng();
 
     while !app.should_quit {
-        // Keep the app's notion of the screen size current for transition capture.
         let size = terminal.size()?;
-        app.set_area(Rect::new(0, 0, size.width, size.height));
+        let area = Rect::new(0, 0, size.width, size.height);
+        fx.sync(&app, area, &mut rng);
 
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &app, &fx))?;
 
         // Wait for input up to the remaining tick budget.
         let timeout = TICK.checked_sub(last_tick.elapsed()).unwrap_or(Duration::ZERO);

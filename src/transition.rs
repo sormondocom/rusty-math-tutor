@@ -100,6 +100,30 @@ impl Effect {
     }
 }
 
+/// The frontend-neutral state of a transition: which effect, and how far along.
+///
+/// The **core** owns this — it carries the timing and lets the app gate input
+/// and know when to swap problems — but holds no pixels.  The terminal frontend
+/// builds the matching visual [`Transition`] and renders it at [`progress`].
+#[derive(Copy, Clone, Debug)]
+pub struct TransitionPhase {
+    pub effect: Effect,
+    pub progress: f32,
+}
+
+impl TransitionPhase {
+    /// Begin a transition with a randomly chosen effect.
+    pub fn new(rng: &mut impl Rng) -> Self {
+        TransitionPhase { effect: Effect::random(rng), progress: 0.0 }
+    }
+
+    /// Advance one tick; returns `true` once finished.
+    pub fn advance(&mut self) -> bool {
+        self.progress += 1.0 / self.effect.duration();
+        self.progress >= 1.0
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Particles (analytic — position is a function of elapsed frames)
 // ---------------------------------------------------------------------------
@@ -186,11 +210,9 @@ pub struct Transition {
 }
 
 impl Transition {
-    pub fn new(from: Buffer, to: Buffer, rng: &mut impl Rng) -> Self {
-        Self::with_effect(Effect::random(rng), from, to, rng)
-    }
-
-    /// Construct with a specific effect (used by tests for full coverage).
+    /// Construct the visual for a specific effect.  The effect itself is chosen
+    /// by the core ([`TransitionPhase`]); the terminal frontend builds this to
+    /// match, capturing the outgoing/incoming cards.
     pub fn with_effect(effect: Effect, from: Buffer, to: Buffer, rng: &mut impl Rng) -> Self {
         let area = from.area;
         let glyphs = match effect {
@@ -214,10 +236,11 @@ impl Transition {
         Transition { effect, from, to, progress: 0.0, seed: rng.gen(), glyphs, rockets, stars, movers }
     }
 
-    /// Advance one tick; returns `true` once finished.
-    pub fn advance(&mut self) -> bool {
-        self.progress += 1.0 / self.effect.duration();
-        self.progress >= 1.0
+    /// Drive the playback position.  The terminal frontend sets this from the
+    /// core's [`TransitionPhase::progress`] each frame, so the visual stays in
+    /// lockstep with the (headless) core that owns the timing.
+    pub fn set_progress(&mut self, p: f32) {
+        self.progress = p;
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {

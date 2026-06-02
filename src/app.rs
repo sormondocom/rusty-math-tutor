@@ -8,15 +8,12 @@ use std::time::{Duration, Instant};
 use crate::input::{InputEvent, Key, Mods};
 use rand::rngs::ThreadRng;
 use rand::Rng;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
 
 use crate::config::Config;
 use crate::problem::{self, Op};
 use crate::section::Active;
 use crate::topic::Topic;
-use crate::transition::Transition;
-use crate::ui;
+use crate::transition::TransitionPhase;
 
 /// How long a Challenge run lasts.
 const CHALLENGE_LEN: Duration = Duration::from_secs(60);
@@ -28,6 +25,8 @@ const MENU_ITEMS: usize = 17;
 const FRAC_MAT_PER_REGION: u32 = 6;
 /// Editable fields on the Experimentation explorer.
 const EXP_FIELDS: usize = 4;
+/// Editable rows on the Settings screen (grade + four range knobs).
+pub const SETTINGS_FIELDS: usize = 5;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
@@ -56,7 +55,8 @@ pub struct Cinematic {
     pub index: usize,
     /// Ticks left to linger on the current scene (counts down from its dwell).
     pub dwell: u32,
-    pub transition: Option<Transition>,
+    /// Scene-to-scene transition timing (the terminal frontend renders it).
+    pub transition: Option<TransitionPhase>,
     started: Instant,
 }
 
@@ -190,10 +190,12 @@ pub struct App {
     /// Ticks the current shape (fraction / percent) has been materialising.
     pub frac_anim: u32,
 
-    // Transition between the answered card and the next one.
-    pub transition: Option<Transition>,
-    /// The next problem, captured for the transition's destination card.
-    pending: Option<Active>,
+    // Transition between the answered card and the next one.  The core tracks
+    // only the timing/phase; the terminal frontend owns the captured pixels.
+    pub transition: Option<TransitionPhase>,
+    /// The next problem, shown as the transition's destination card.  Public so
+    /// the frontend can render it during a transition.
+    pub pending: Option<Active>,
 
     // Deduction Duck help overlay: `help_in` eases 0..1 toward the target set
     // by `help_active`; `strategy_index` selects which method he shows.
@@ -250,10 +252,6 @@ pub struct App {
     // one-shot encouraging line shown when Deduction Duck steps in.
     wrong_streak: u32,
     pub encourage: Option<String>,
-
-    /// Most recent full-frame area, refreshed by [`App::set_area`] each loop so
-    /// transition capture matches what is on screen.
-    area: Rect,
 
     pub should_quit: bool,
 }
@@ -326,13 +324,8 @@ impl App {
             cinematic_return: Screen::Practice,
             wrong_streak: 0,
             encourage: None,
-            area: Rect::new(0, 0, 80, 24),
             should_quit: false,
         }
-    }
-
-    pub fn set_area(&mut self, area: Rect) {
-        self.area = area;
     }
 
     // -- per-tick update ----------------------------------------------------
@@ -402,12 +395,9 @@ impl App {
             c.dwell = c.dwell.saturating_sub(1);
             if c.dwell == 0 {
                 if c.index + 1 < c.scenes.len() {
-                    let area = self.area;
-                    // Leave the current scene at its settled (fully animated) end
-                    // and enter the next at its start frame for smooth continuity.
-                    let from = capture_scene(area, &c.scenes[c.index], c.scenes[c.index].dwell as u64);
-                    let to = capture_scene(area, &c.scenes[c.index + 1], 0);
-                    c.transition = Some(Transition::new(from, to, &mut self.rng));
+                    // Start a scene-to-scene transition; the terminal frontend
+                    // blends scene `index` (settled) into `index + 1` (frame 0).
+                    c.transition = Some(TransitionPhase::new(&mut self.rng));
                 } else {
                     finished = true;
                 }
@@ -743,8 +733,8 @@ impl App {
 
     fn on_settings_key(&mut self, key: Key) {
         match key {
-            Key::Up => self.settings_field = (self.settings_field + ui::SETTINGS_FIELDS - 1) % ui::SETTINGS_FIELDS,
-            Key::Down => self.settings_field = (self.settings_field + 1) % ui::SETTINGS_FIELDS,
+            Key::Up => self.settings_field = (self.settings_field + SETTINGS_FIELDS - 1) % SETTINGS_FIELDS,
+            Key::Down => self.settings_field = (self.settings_field + 1) % SETTINGS_FIELDS,
             Key::Left => self.adjust_setting(false),
             Key::Right => self.adjust_setting(true),
             Key::Esc | Key::Enter => {
@@ -1026,14 +1016,11 @@ impl App {
         }
     }
 
-    /// Capture the (correct) current card and the next card, then kick off a
-    /// random transition between them.
+    /// Pick the next problem and start a transition to it.  The core only tracks
+    /// the timing; the terminal frontend captures the cards and animates them.
     fn begin_transition(&mut self) {
         self.generate_pending();
-        let area = ui::card_area(self.screen, self.area);
-        let from = self.capture_current(area, Some(("✓  Correct!".to_string(), ratatui::style::Color::LightGreen)));
-        let to = self.capture_pending(area);
-        self.transition = Some(Transition::new(from, to, &mut self.rng));
+        self.transition = Some(TransitionPhase::new(&mut self.rng));
     }
 
     // -- Units of Measure (mixed into sessions) -----------------------------
@@ -1094,40 +1081,6 @@ impl App {
         self.revealed = false;
         self.reprimand = None;
         self.reprimand_index = 0;
-    }
-
-    /// Render any section's problem card into `buf` — the single place card
-    /// rendering dispatches on the active section.
-    fn render_active(
-        &self,
-        active: &Active,
-        area: Rect,
-        buf: &mut Buffer,
-        input: &str,
-        progress: f32,
-        banner: Option<(String, ratatui::style::Color)>,
-    ) {
-        match active {
-            Active::Shape(s) => ui::render_shape_card(area, buf, s, input, progress, banner),
-            Active::Unit(u) => ui::render_unit_card(area, buf, u, input, banner),
-            Active::Geo(g) => ui::render_geometry_card(area, buf, g, input, banner),
-            Active::Arith(p) => ui::render_card(area, buf, p, input, self.config.layout, banner),
-        }
-    }
-
-    fn capture_current(&self, area: Rect, banner: Option<(String, ratatui::style::Color)>) -> Buffer {
-        let mut buf = Buffer::empty(area);
-        self.render_active(&self.current, area, &mut buf, &self.input, 1.0, banner);
-        buf
-    }
-
-    fn capture_pending(&self, area: Rect) -> Buffer {
-        let mut buf = Buffer::empty(area);
-        if let Some(pending) = &self.pending {
-            // Capture at progress 0 so a shape materialises live afterwards.
-            self.render_active(pending, area, &mut buf, "", 0.0, None);
-        }
-        buf
     }
 
     // -- Experimentation (free-form unit explorer) --------------------------
@@ -1209,14 +1162,6 @@ impl App {
 fn bump(v: i64, up: bool, delta: i64, min: i64, max: i64) -> i64 {
     let next = if up { v + delta } else { v - delta };
     next.clamp(min, max)
-}
-
-/// Render a cinematic scene into a fresh buffer for transition capture, frozen
-/// at `frame` ticks (animated scenes settle to that point).
-fn capture_scene(area: Rect, scene: &crate::cinematic::Scene, frame: u64) -> Buffer {
-    let mut buf = Buffer::empty(area);
-    ui::render_scene(area, &mut buf, scene, frame);
-    buf
 }
 
 // ---------------------------------------------------------------------------
