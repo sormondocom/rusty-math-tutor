@@ -14,13 +14,19 @@ fn draw_app(term: &mut Terminal<TestBackend>, app: &App) {
     term.draw(|f| ui::draw(f, app, &fx)).unwrap();
 }
 
+/// A fresh app backed by in-memory storage, so tests never touch the real
+/// config/roster files on disk.
+fn test_app() -> App {
+    App::new(Config::default(), Box::new(crate::storage::MemStorage::default()))
+}
+
 /// Render every screen at several sizes (including cramped ones) to prove
 /// the direct buffer writes in font/duck/transition stay in bounds.
 #[test]
 fn rendering_never_panics() {
     for (w, h) in [(80, 24), (120, 40), (30, 12), (40, 10)] {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        let mut app = App::new(Config::default());
+        let mut app = test_app();
 
         // Startup, menu (with name prompt), settings, stats.
         draw_app(&mut term, &app);
@@ -189,7 +195,7 @@ fn division_is_always_exact_and_answers_check_out() {
 #[test]
 fn why_panel_fits_when_tall_and_scrolls_when_short() {
     let make = || {
-        let mut app = App::new(Config::default());
+        let mut app = test_app();
         app.menu_ops = [true, false, false, false];
         app.start_session(false);
         app.why_active = true;
@@ -224,7 +230,7 @@ fn menu_duck_renders_across_cycle_without_panic() {
     // Sweep the whole appearance cycle (walk + both peeks) at a few sizes.
     for (w, h) in [(64u16, 40u16), (64, 24), (40, 12)] {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        let mut app = App::new(Config::default());
+        let mut app = test_app();
         app.screen = Screen::Menu;
         for frame in (0u64..2600).step_by(13) {
             app.anim_frame = frame;
@@ -248,7 +254,7 @@ fn every_unit_problem_has_a_help_hint() {
 
 #[test]
 fn unit_problem_help_renders() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.menu_ops = [false, false, false, false];
     app.menu_units = true;
     app.start_session(false);
@@ -268,7 +274,7 @@ fn unit_problem_help_renders() {
 
 #[test]
 fn peeking_too_much_locks_the_answer_with_reprimands() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.roster = crate::student::Roster::default();
     app.menu_ops = [true, false, false, false];
     app.start_session(false);
@@ -302,7 +308,7 @@ fn peeking_too_much_locks_the_answer_with_reprimands() {
 #[test]
 fn reveal_lock_is_per_student_and_can_be_disabled() {
     use crate::input::{InputEvent, Key};
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     // Use a clean single-student roster (tests share the on-disk one).
     app.roster = crate::student::Roster::default();
 
@@ -372,7 +378,7 @@ fn fraction_asked_colour_pieces_equal_the_numerator() {
 fn fractions_mix_into_a_session_and_advance() {
     // A fractions-only session: every problem is a fraction, and solving one
     // (in any equivalent form) advances to the next via the transition.
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.menu_ops = [false, false, false, false];
     app.menu_fractions = true;
     app.start_session(false);
@@ -399,7 +405,7 @@ fn fractions_mix_into_a_session_and_advance() {
 #[test]
 fn slash_key_types_a_fraction_answer() {
     // Regression: pressing digits and '/' must build an "a/b" answer.
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.roster = crate::student::Roster::default();
     app.menu_ops = [false, false, false, false];
     app.menu_fractions = true;
@@ -429,7 +435,7 @@ fn title_screens_feature_deduction_duck() {
     // The "Featuring: Deduction Duck" tagline appears under the title on both
     // the startup picker and the main menu.
     for screen in [Screen::Startup, Screen::Menu] {
-        let mut app = App::new(Config::default());
+        let mut app = test_app();
         app.roster = crate::student::Roster::default();
         app.screen = screen;
         let mut term = Terminal::new(TestBackend::new(70, 22)).unwrap();
@@ -476,7 +482,7 @@ fn geometry_answers_match_their_formulas() {
 
 #[test]
 fn geometry_mixes_into_a_session_and_records() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.roster = crate::student::Roster::default();
     app.menu_ops = [false, false, false, false];
     app.menu_geometry = true;
@@ -692,7 +698,7 @@ fn name_sky_survives_a_cramped_sky() {
 #[test]
 fn teacher_records_show_every_section_score() {
     use crate::topic::Topic;
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.roster = crate::student::Roster::default();
     // Give the current student one solve in each non-arithmetic section.
     {
@@ -793,7 +799,7 @@ fn explorer_converts_and_handles_outrageous_values() {
 #[test]
 fn experiment_keys_drive_the_explorer() {
     use crate::input::{InputEvent, Key};
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.screen = Screen::Experiment;
     // Cycle to the Category field and switch category; indices stay valid.
     app.exp_field = 3;
@@ -824,7 +830,7 @@ fn unit_problems_are_well_formed_for_every_locality() {
 
 #[test]
 fn units_checkbox_makes_a_unit_session_that_advances() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     // Only the Units checkbox on -> every problem is a measurement.
     app.menu_ops = [false, false, false, false];
     app.menu_units = true;
@@ -851,7 +857,7 @@ fn units_checkbox_makes_a_unit_session_that_advances() {
 #[test]
 fn mixed_session_can_show_both_problem_types() {
     // Arithmetic + units enabled: over many problems we should see both.
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.menu_ops = [true, false, false, false];
     app.menu_units = true;
     let mut saw_unit = false;
@@ -872,7 +878,7 @@ fn mixed_session_can_show_both_problem_types() {
 
 #[test]
 fn milestone_triggers_cinematic_then_resumes() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.menu_ops = [true, false, false, false]; // addition only
     app.start_session(false);
     // Sit at 6 solved so the next correct answer hits the 7 milestone.
@@ -898,7 +904,7 @@ fn milestone_triggers_cinematic_then_resumes() {
 
 #[test]
 fn repeated_wrong_answers_summon_encouragement() {
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.menu_ops = [true, false, false, false];
     app.start_session(false);
     let wrong = (app.current.correct_answer_string().parse::<i64>().unwrap() + 1).to_string();
@@ -1024,7 +1030,7 @@ fn each_topic_records_into_its_own_progress() {
 fn percentages_mix_into_a_session_and_record() {
     // A percentages-only session: every problem is a percent, answered with a
     // plain integer, and a correct answer credits the percentages counter.
-    let mut app = App::new(Config::default());
+    let mut app = test_app();
     app.roster = crate::student::Roster::default();
     app.menu_ops = [false, false, false, false];
     app.menu_percents = true;

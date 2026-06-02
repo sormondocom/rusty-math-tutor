@@ -21,6 +21,7 @@ mod motivation;
 mod problem;
 mod section;
 mod shapes;
+mod storage;
 mod strategy;
 mod student;
 mod topic;
@@ -29,6 +30,7 @@ mod ui;
 mod units;
 
 use std::io::{self, Stdout};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -42,6 +44,7 @@ use ratatui::Terminal;
 use app::App;
 use config::Config;
 use input::{InputEvent, Key, Mods};
+use storage::Storage;
 
 /// Target frame interval — fast enough for smooth transitions, idle-cheap.
 const TICK: Duration = Duration::from_millis(33);
@@ -54,7 +57,9 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    let mut app = App::new(Config::load());
+    let storage: Box<dyn Storage> = Box::new(FileStorage);
+    let config = Config::load(storage.as_ref());
+    let mut app = App::new(config, storage);
     let mut last_tick = Instant::now();
     // Terminal-frontend render state: the captured pixels for any in-flight
     // transition, kept in step with the core's timing each frame.
@@ -86,9 +91,41 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
     }
     // Persist any layout change and the latest progress on the way out.
-    app.config.save();
-    app.roster.save();
+    app.persist();
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Terminal-frontend persistence: JSON files under the platform config dir.
+// ---------------------------------------------------------------------------
+
+struct FileStorage;
+
+impl Storage for FileStorage {
+    fn load(&self, key: &str) -> Option<String> {
+        data_path(key).and_then(|p| std::fs::read_to_string(p).ok())
+    }
+
+    fn save(&self, key: &str, data: &str) {
+        let Some(path) = data_path(key) else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, data);
+    }
+}
+
+/// `…/rusty-math-tutor/<file>` under the platform config directory, so every
+/// persisted file (config, student roster, custom motivations) lives together.
+fn data_path(file: &str) -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+    }?;
+    Some(base.join("rusty-math-tutor").join(file))
 }
 
 /// Map a crossterm key press into a frontend-neutral [`InputEvent`].  Keys the

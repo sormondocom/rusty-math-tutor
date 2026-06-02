@@ -132,9 +132,9 @@ impl Default for Roster {
 }
 
 impl Roster {
-    pub fn load() -> Roster {
-        let mut r: Roster = crate::config::data_path("students.json")
-            .and_then(|p| std::fs::read_to_string(p).ok())
+    pub fn load(storage: &dyn crate::storage::Storage) -> Roster {
+        let mut r: Roster = storage
+            .load("students.json")
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         if r.students.is_empty() {
@@ -144,13 +144,9 @@ impl Roster {
         r
     }
 
-    pub fn save(&self) {
-        let Some(path) = crate::config::data_path("students.json") else { return };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+    pub fn save(&self, storage: &dyn crate::storage::Storage) {
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, json);
+            storage.save("students.json", &json);
         }
     }
 

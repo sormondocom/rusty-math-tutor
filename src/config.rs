@@ -6,9 +6,9 @@
 //! I/O is best-effort: a missing or unreadable file simply falls back to the
 //! built-in defaults so the app always starts.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
+
+use crate::storage::Storage;
 
 /// Which rendering frontend drives the app.
 ///
@@ -162,11 +162,11 @@ impl Config {
         &mut self.grades[i]
     }
 
-    /// Load config from disk, falling back to defaults on any problem.  A
-    /// short/old file (fewer grades than expected) is topped up from defaults.
-    pub fn load() -> Config {
-        let mut cfg = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+    /// Load config from `storage`, falling back to defaults on any problem.  A
+    /// short/old blob (fewer grades than expected) is topped up from defaults.
+    pub fn load(storage: &dyn Storage) -> Config {
+        let mut cfg = storage
+            .load("config.json")
             .and_then(|s| serde_json::from_str::<Config>(&s).ok())
             .unwrap_or_default();
         if cfg.grades.len() < GRADES {
@@ -200,31 +200,9 @@ impl Config {
     }
 
     /// Best-effort save; errors are ignored so they never interrupt a lesson.
-    pub fn save(&self) {
-        let Some(path) = config_path() else { return };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
+    pub fn save(&self, storage: &dyn Storage) {
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, json);
+            storage.save("config.json", &json);
         }
     }
-}
-
-fn config_path() -> Option<PathBuf> {
-    data_path("config.json")
-}
-
-/// `…/rusty-math-tutor/<file>` under the platform config directory.  Shared so
-/// every persisted file (config, custom motivations, student roster) lives
-/// together.
-pub fn data_path(file: &str) -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-    }?;
-    Some(base.join("rusty-math-tutor").join(file))
 }

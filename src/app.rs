@@ -12,6 +12,7 @@ use rand::Rng;
 use crate::config::Config;
 use crate::problem::{self, Op};
 use crate::section::Active;
+use crate::storage::Storage;
 use crate::topic::Topic;
 use crate::transition::TransitionPhase;
 
@@ -137,6 +138,9 @@ pub struct App {
     rng: ThreadRng,
     pub config: Config,
     pub roster: crate::student::Roster,
+    /// Where config / roster / "Why?" extras are persisted.  The terminal
+    /// frontend backs this with files; tests use an in-memory store.
+    storage: Box<dyn Storage>,
 
     // Adding a student from the menu.
     pub naming: bool,
@@ -257,15 +261,18 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, storage: Box<dyn Storage>) -> Self {
         let mut rng = rand::thread_rng();
         let current = Active::Arith(problem::generate(config.range(1), &[Op::Add], &mut rng));
         let startup_index = if config.graphics == crate::config::GraphicsMode::Cpu { 1 } else { 0 };
+        let roster = crate::student::Roster::load(storage.as_ref());
+        let why_extras = crate::motivation::Extras::load(storage.as_ref());
         App {
             screen: Screen::Startup,
             rng,
             config,
-            roster: crate::student::Roster::load(),
+            roster,
+            storage,
             naming: false,
             name_input: String::new(),
             streak: 0,
@@ -309,7 +316,7 @@ impl App {
             why_code: None,
             why_scroll: 0,
             why_max_scroll: std::cell::Cell::new(0),
-            why_extras: crate::motivation::Extras::load(),
+            why_extras,
             teacher_authed: false,
             teacher_view: TeacherView::Anecdotes,
             teacher_pw: String::new(),
@@ -326,6 +333,27 @@ impl App {
             encourage: None,
             should_quit: false,
         }
+    }
+
+    // -- persistence (routed through the frontend's Storage) ----------------
+
+    fn save_config(&self) {
+        self.config.save(self.storage.as_ref());
+    }
+
+    fn save_roster(&self) {
+        self.roster.save(self.storage.as_ref());
+    }
+
+    fn save_extras(&self) {
+        self.why_extras.save(self.storage.as_ref());
+    }
+
+    /// Persist everything that changes during play (config + roster).  The
+    /// frontend calls this on the way out.
+    pub fn persist(&self) {
+        self.save_config();
+        self.save_roster();
     }
 
     // -- per-tick update ----------------------------------------------------
@@ -369,7 +397,7 @@ impl App {
                     c.finished = true;
                     self.help_active = false;
                     // Lock in the progress earned during the timed run.
-                    self.roster.save();
+                    self.save_roster();
                 }
             }
         }
@@ -539,7 +567,7 @@ impl App {
             Key::Enter => {
                 if !self.name_input.trim().is_empty() {
                     self.roster.add(&self.name_input);
-                    self.roster.save();
+                    self.save_roster();
                 }
                 self.naming = false;
                 self.name_input.clear();
@@ -608,7 +636,7 @@ impl App {
                     self.teacher_msg = Some("Pick a password to protect teacher tools.".to_string());
                 } else {
                     self.config.set_teacher_password(&self.teacher_pw);
-                    self.config.save();
+                    self.save_config();
                     self.teacher_authed = true;
                     self.teacher_msg = Some("Password set! You're logged in.".to_string());
                 }
@@ -637,7 +665,7 @@ impl App {
                 let topic = Topic::ALL[self.teacher_topic];
                 if !self.teacher_text.trim().is_empty() {
                     self.why_extras.add(topic, &self.teacher_text);
-                    self.why_extras.save();
+                    self.save_extras();
                     self.teacher_msg = Some("Saved your example. Thank you!".to_string());
                 }
                 self.teacher_adding = false;
@@ -698,14 +726,14 @@ impl App {
                 let topic = Topic::ALL[self.teacher_topic];
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.students[self.teacher_rec_index].reset_topic(topic);
-                self.roster.save();
+                self.save_roster();
                 self.teacher_msg = Some(format!("Reset {} for {}.", topic.name(), name));
             }
             // R: reset all of this student's records.
             Key::Char('r') | Key::Char('R') => {
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.students[self.teacher_rec_index].reset();
-                self.roster.save();
+                self.save_roster();
                 self.teacher_msg = Some(format!("Reset all records for {}.", name));
             }
             // X: remove the student entirely (a Guest is kept if it's the last).
@@ -713,19 +741,19 @@ impl App {
                 let name = self.roster.students[self.teacher_rec_index].name.clone();
                 self.roster.remove(self.teacher_rec_index);
                 self.teacher_rec_index = self.teacher_rec_index.min(self.roster.students.len() - 1);
-                self.roster.save();
+                self.save_roster();
                 self.teacher_msg = Some(format!("Removed {}.", name));
             }
             // + / - : adjust this student's reveal limit (0 = never lock, max 9).
             Key::Char('+') | Key::Char('=') => {
                 let s = &mut self.roster.students[self.teacher_rec_index];
                 s.reveal_lock = (s.reveal_lock + 1).min(9);
-                self.roster.save();
+                self.save_roster();
             }
             Key::Char('-') | Key::Char('_') => {
                 let s = &mut self.roster.students[self.teacher_rec_index];
                 s.reveal_lock = s.reveal_lock.saturating_sub(1);
-                self.roster.save();
+                self.save_roster();
             }
             _ => {}
         }
@@ -739,7 +767,7 @@ impl App {
             Key::Right => self.adjust_setting(true),
             Key::Esc | Key::Enter => {
                 // Save and return to the menu.
-                self.config.save();
+                self.save_config();
                 self.screen = Screen::Menu;
             }
             _ => {}
@@ -967,7 +995,7 @@ impl App {
         self.why_active = false;
         self.challenge = None;
         // Persist progress earned this session.
-        self.roster.save();
+        self.save_roster();
     }
 
     fn check_answer(&mut self) {
@@ -1031,7 +1059,7 @@ impl App {
         let n = all.len();
         let next = if forward { (i + 1) % n } else { (i + n - 1) % n };
         self.config.locality = all[next];
-        self.config.save();
+        self.save_config();
     }
 
     /// Generate the next problem, randomly choosing a section from the enabled

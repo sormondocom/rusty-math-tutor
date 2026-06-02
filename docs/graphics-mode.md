@@ -160,16 +160,25 @@ step.
 - [x] **`app` now has zero `ratatui` (and `crossterm`) imports.** 47 tests green,
       no behavior change, clean release build.
 
-**Step 3 — Storage seam**
-- [ ] `Storage` trait; terminal = filesystem (`config::data_path`), web =
-      `localStorage` later. `app`/`config`/`student` stop calling `std::fs`
-      directly.
+**Step 3 — Storage seam ✅ done**
+- [x] `Storage` trait (`src/storage.rs`): `load(key)` / `save(key, data)`.
+- [x] `Config`/`Roster`/`Extras` `load`/`save` take `&dyn Storage`; the
+      filesystem impl (`FileStorage` + `data_path`) moved into the terminal
+      frontend (`main.rs`). The app holds a `Box<dyn Storage>` and persists
+      through it; tests use an in-memory `MemStorage` (no disk).
+- [x] **`app`/`config`/`student`/`motivation` no longer call `std::fs`.**
+      47 tests green, no behavior change.
 
 **Step 4 — Relocate**
 - [ ] Move modules into `core/` vs `frontends/terminal/`.
+- [ ] Small follow-up: the domain still imports `ratatui::style::Color` as a
+      *data* type (accents/palettes in `fraction`/`problem`/`cinematic`).
+      Introduce a `core::Color` and convert at the frontend so the core links no
+      ratatui at all.
 
 Exit criteria: identical behavior, full suite green, `app` has no `crossterm`,
-`ratatui`, or `std::fs` imports.
+`ratatui`, or `std::fs` imports. **✅ met** (the `Color` residue above is the
+only remaining ratatui *type* in the wider domain, not in `app`).
 
 ### Phase 1 — Enhanced terminal (optional quick win)
 
@@ -262,3 +271,7 @@ _Decision log_
 - **Revised plan:** a shared semantic `Renderer`/`Scene` is *not* pursued; the
   GUI frontend (Phase 2) will read `&App` and render pixels independently, the
   way `ui.rs` reads `&App` and renders cells.
+- **Phase 0 step 3 (storage seam): done** — `Storage` trait; `config`/`student`/
+  `motivation` off `std::fs`; `FileStorage` lives in the terminal frontend.
+  `app` now has no `crossterm`, `ratatui`, or `std::fs` imports — **Phase 0 exit
+  criterion met.** Remaining: relocate modules (step 4) + neutralize `Color`.
