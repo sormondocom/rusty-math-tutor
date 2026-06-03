@@ -222,8 +222,9 @@ feature so the default terminal build stays lean and `musl`-static.
       `InputEvent`, drives `App::on_tick` on the 33 ms clock, paints a CPU
       `tiny-skia` frame and presents it via `softbuffer`. Compiles clean against
       the real APIs.
-- [x] Launch with `cargo run --features gui -- --gui` (terminal stays the
-      default). Persists via `App::persist` on exit.
+- [x] Launch straight into the window with `cargo run -- --gui` (now part of the
+      default build; see Slice 3 for the unified hand-off). Persists via
+      `App::persist` on exit.
 
 **Slice 2 — render the screens — ✅ done**
 - [x] Real **TTF text via `ab_glyph`**: a system font is loaded at runtime
@@ -268,12 +269,26 @@ feature so the default terminal build stays lean and `musl`-static.
         the same blend engine.
 
 **Slice 3 — ship it ✅ done**
-- [x] `GraphicsMode::Cpu::available()` is true when built `--features gui`, and
+- [x] `GraphicsMode::Cpu::available()` is true when the window is compiled in, and
       the Startup picker offers "CPU Graphics (window)".
-- [x] `main.rs` launches the window when CPU is the saved preference (or `--gui`)
-      — set it from the picker, it sticks. Terminal stays the default build.
-- [x] Release workflow builds a **`...-windows-x86_64-gui.exe`** artifact
-      (`--features gui`); README links it. 47 tests green; both builds clean.
+- [x] One **unified binary** (`gui` is a default feature): `main.rs` boots the
+      console TUI by default (whatever was last persisted), and choosing CPU
+      Graphics in the picker hands off to the window (choosing console in the
+      window hands back).  `--gui` boots straight into the window's picker.
+- [x] The hand-off **re-launches a fresh process** in the other mode (`--gui`
+      for the window, no flag for the console) and exits, rather than switching
+      in-process.  This is deliberate: after the terminal has driven the console
+      (crossterm raw mode), a window created in that *same* process can't reliably
+      take keyboard focus on Windows — Windows only grants focus to a window whose
+      process was launched by the foreground process.  A freshly spawned process
+      gets it, exactly as a user-typed `--gui` does.  On Windows the child is
+      spawned with `CREATE_NO_WINDOW` (window build) or `CREATE_NEW_CONSOLE`
+      (console build), and the parent calls `AllowSetForegroundWindow` so the
+      child may foreground itself.  The new process opens on its **startup picker**
+      (not the menu) so a stray first `Enter` can't land in a text field.
+- [x] Release workflow ships the unified **`...-windows-x86_64.exe`**; the static
+      musl Chromebook builds use `--no-default-features` (console only, no window
+      deps). Unified suite 49 green, console-only 47 green; all builds clean.
 
 ### Phase 3 — Software 3D
 

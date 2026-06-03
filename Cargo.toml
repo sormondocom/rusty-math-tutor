@@ -10,10 +10,11 @@ name = "tutor"
 path = "src/main.rs"
 
 [features]
-# The terminal frontend is the default.  `gui` adds the CPU-rendered native
-# window (Phase 2): a separate frontend that pulls winit/softbuffer/tiny-skia and
-# leaves the default, musl-static terminal build untouched.
-default = []
+# One unified binary by default: it boots into the console TUI, and choosing
+# "CPU Graphics" in the startup picker hands off to the native window (and back).
+# Lean / static targets (e.g. the musl Chromebook builds) drop the window with
+# `--no-default-features`, leaving a console-only binary.
+default = ["gui"]
 gui = ["dep:winit", "dep:softbuffer", "dep:tiny-skia", "dep:font8x8", "dep:ab_glyph"]
 
 [dependencies]

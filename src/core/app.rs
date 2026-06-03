@@ -495,7 +495,8 @@ impl App {
         match key {
             Key::Up | Key::Down => self.startup_index ^= 1,
             Key::Enter | Key::Char(' ') => {
-                // CPU mode is shelved; only Low actually proceeds.
+                // CPU Graphics proceeds only when the window is built in; the
+                // frontend watches `config.graphics` and hands off accordingly.
                 let mode = if self.startup_index == 1 { GraphicsMode::Cpu } else { GraphicsMode::Low };
                 if mode.available() {
                     self.config.graphics = mode;

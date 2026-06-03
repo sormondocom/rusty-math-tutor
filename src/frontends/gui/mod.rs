@@ -27,26 +27,29 @@ use crate::input::{InputEvent, Key, Mods};
 /// Per-frame interval — matches the terminal's ~30 fps tick.
 const TICK: Duration = Duration::from_millis(33);
 
-/// Run the app in a native CPU-rendered window until it quits.
-pub fn run(app: App) -> Result<()> {
+/// Run the app in a native CPU-rendered window until it quits or the user
+/// switches back to console graphics.  Returns `true` when a switch is pending.
+pub fn run(app: &mut App) -> Result<bool> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::wait_duration(TICK));
     let mut gui = Gui::new(app);
     event_loop.run_app(&mut gui)?;
-    Ok(())
+    Ok(gui.switch)
 }
 
-struct Gui {
-    app: App,
+struct Gui<'a> {
+    app: &'a mut App,
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
     mods: ModifiersState,
     last_tick: Instant,
+    /// Set when the user picked console graphics — hand back to the terminal.
+    switch: bool,
 }
 
-impl Gui {
-    fn new(app: App) -> Self {
-        Gui { app, window: None, surface: None, mods: ModifiersState::empty(), last_tick: Instant::now() }
+impl<'a> Gui<'a> {
+    fn new(app: &'a mut App) -> Self {
+        Gui { app, window: None, surface: None, mods: ModifiersState::empty(), last_tick: Instant::now(), switch: false }
     }
 
     fn redraw(&mut self) {
@@ -61,7 +64,7 @@ impl Gui {
         // The scene renders at `SS×` resolution; box-average each SS×SS block
         // down to one output pixel.  That supersample is our anti-aliasing —
         // smooth edges without tiny-skia's (panicky) AA rasteriser.
-        let pixmap = scene::render(&self.app, w, h);
+        let pixmap = scene::render(&*self.app, w, h);
         let Ok(mut buffer) = surface.buffer_mut() else { return };
         let ss = scene::SS;
         let sw = w * ss; // supersampled row stride
@@ -87,15 +90,18 @@ impl Gui {
     }
 }
 
-impl ApplicationHandler for Gui {
+impl ApplicationHandler for Gui<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
             .with_title("Rusty Math Tutor")
+            .with_active(true)
             .with_inner_size(winit::dpi::LogicalSize::new(960.0, 680.0));
         let Ok(window) = event_loop.create_window(attrs) else { return };
         let window = Rc::new(window);
+        window.focus_window(); // claim keyboard focus on this fresh-process window
         let Ok(context) = Context::new(window.clone()) else { return };
         let Ok(surface) = Surface::new(&context, window.clone()) else { return };
+        window.request_redraw(); // paint the first frame immediately
         self.window = Some(window);
         self.surface = Some(surface);
     }
@@ -110,6 +116,10 @@ impl ApplicationHandler for Gui {
                         self.app.on_event(ev);
                     }
                     if self.app.should_quit {
+                        event_loop.exit();
+                    } else if self.app.config.graphics != crate::config::GraphicsMode::Cpu {
+                        // The user chose console graphics — hand back to the terminal.
+                        self.switch = true;
                         event_loop.exit();
                     } else if let Some(w) = &self.window {
                         w.request_redraw();

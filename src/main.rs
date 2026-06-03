@@ -88,22 +88,88 @@ const TICK: Duration = Duration::from_millis(33);
 fn main() -> Result<()> {
     let storage: Box<dyn Storage> = Box::new(FileStorage);
     let config = Config::load(storage.as_ref());
+    let mut app = App::new(config, storage);
 
-    // CPU graphics (feature = "gui"): launch the native window when it's the
-    // saved preference (set in the Startup picker) or forced with `--gui`.
+    // Always default to the console, whatever was last persisted — the CPU-graphics
+    // window opens only when the user picks it in the picker.  `--gui` boots
+    // straight into the window's startup picker (CPU pre-selected).
+    app.config.graphics = config::GraphicsMode::Low;
+    app.startup_index = 0;
     #[cfg(feature = "gui")]
-    if config.graphics == config::GraphicsMode::Cpu || std::env::args().any(|a| a == "--gui") {
-        return gui::run(App::new(config, storage));
+    if std::env::args().any(|a| a == "--gui") {
+        app.config.graphics = config::GraphicsMode::Cpu;
+        app.startup_index = 1;
     }
 
+    // Run the frontend for this mode.  If the user switches mode in the picker,
+    // hand off by launching a *fresh* process in the other mode and exiting — a
+    // clean process avoids the console↔window keyboard-focus clash that an
+    // in-process switch hits on Windows once the terminal has held the console.
+    #[cfg_attr(not(feature = "gui"), allow(unused_variables))]
+    let switching = run_frontend(&mut app)?;
+    #[cfg(feature = "gui")]
+    if switching {
+        relaunch(app.config.graphics)?;
+    }
+    Ok(())
+}
+
+/// Run whichever frontend matches the app's current graphics mode, until the app
+/// quits or the user switches mode.  Returns `true` when a switch is pending.
+fn run_frontend(app: &mut App) -> Result<bool> {
+    #[cfg(feature = "gui")]
+    if app.config.graphics == config::GraphicsMode::Cpu {
+        return gui::run(app);
+    }
+    run_terminal(app)
+}
+
+/// Launch a fresh process in the chosen graphics `mode`, skipping the picker
+/// (`--menu`).  On Windows, give the console build its own console window and the
+/// window build none, so neither leaves a stray window behind.
+#[cfg(feature = "gui")]
+fn relaunch(mode: config::GraphicsMode) -> Result<()> {
+    use std::process::Command;
+    let exe = std::env::current_exe()?;
+    let to_gui = mode == config::GraphicsMode::Cpu;
+    let mut cmd = Command::new(exe);
+    if to_gui {
+        cmd.arg("--gui");
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(if to_gui { CREATE_NO_WINDOW } else { CREATE_NEW_CONSOLE });
+    }
+    let _child = cmd.spawn()?;
+
+    // Windows blocks a spawned process from stealing the foreground (so the new
+    // window would open without keyboard focus).  Grant this child that right so
+    // its `focus_window()` is honoured.
+    #[cfg(windows)]
+    if to_gui {
+        extern "system" {
+            fn AllowSetForegroundWindow(dwProcessId: u32) -> i32;
+        }
+        unsafe {
+            AllowSetForegroundWindow(_child.id());
+        }
+    }
+    Ok(())
+}
+
+/// The console (crossterm + ratatui) frontend: set up the alternate screen, run
+/// the loop, then restore the terminal whatever the outcome.
+fn run_terminal(app: &mut App) -> Result<bool> {
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, config, storage);
+    let result = terminal_loop(&mut terminal, app);
     restore_terminal(&mut terminal)?;
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, config: Config, storage: Box<dyn Storage>) -> Result<()> {
-    let mut app = App::new(config, storage);
+fn terminal_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<bool> {
     let mut last_tick = Instant::now();
     // Terminal-frontend render state: the captured pixels for any in-flight
     // transition, kept in step with the core's timing each frame.
@@ -113,9 +179,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, config: Config, storag
     while !app.should_quit {
         let size = terminal.size()?;
         let area = Rect::new(0, 0, size.width, size.height);
-        fx.sync(&app, area, &mut rng);
+        fx.sync(app, area, &mut rng);
 
-        terminal.draw(|f| ui::draw(f, &app, &fx))?;
+        terminal.draw(|f| ui::draw(f, app, &fx))?;
 
         // Wait for input up to the remaining tick budget.
         let timeout = TICK.checked_sub(last_tick.elapsed()).unwrap_or(Duration::ZERO);
@@ -129,6 +195,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, config: Config, storag
             }
         }
 
+        // The user just chose CPU Graphics — hand off to the window.
+        #[cfg(feature = "gui")]
+        if app.config.graphics != config::GraphicsMode::Low {
+            app.persist();
+            return Ok(true);
+        }
+
         if last_tick.elapsed() >= TICK {
             app.on_tick();
             last_tick = Instant::now();
@@ -136,7 +209,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, config: Config, storag
     }
     // Persist any layout change and the latest progress on the way out.
     app.persist();
-    Ok(())
+    Ok(false)
 }
 
 // ---------------------------------------------------------------------------

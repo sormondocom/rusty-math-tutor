@@ -19,13 +19,11 @@ Grab a ready-to-run program from the [**latest release**](https://github.com/sor
 
 | Your device | Download |
 |-------------|----------|
-| **Windows** — terminal (most PCs) | [rusty-math-tutor-windows-x86_64.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64.exe) |
-| **Windows** — CPU graphics *window* | [rusty-math-tutor-windows-x86_64-gui.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64-gui.exe) |
+| **Windows** (most PCs) | [rusty-math-tutor-windows-x86_64.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64.exe) |
 | **Chromebook** — Intel / AMD | [rusty-math-tutor-linux-x86_64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-x86_64) |
 | **Chromebook** — ARM | [rusty-math-tutor-linux-aarch64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-aarch64) |
 
-- **Windows (terminal):** double-click the `.exe`, or run it from a terminal. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
-- **Windows (CPU graphics window):** the `-gui` build opens a real window with software-rendered 2-D graphics — **no GPU required**. Same app, drawn in pixels. (Pick "CPU Graphics" on the start screen to make it the default, or run with `--gui`.)
+- **Windows:** double-click the `.exe`, or run it from a terminal. It starts in the **console** view; pick **"CPU Graphics"** on the start screen (or run with `--gui`) and it opens a real **window** with software-rendered 2-D graphics — **no GPU required**. Same app, same one download — switch between the two views any time. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
 - **Chromebook:** these run in the built-in **Linux (Crostini)** environment — turn it on at *Settings → Advanced → Developers → Linux development environment*, then in the Linux terminal:
   ```sh
   chmod +x rusty-math-tutor-linux-x86_64   # the file you downloaded
@@ -120,12 +118,24 @@ card required. The goal is to help children, not to sell hardware.
 Requires a [Rust toolchain](https://rustup.rs/) (stable).
 
 ```sh
-cargo run --release
+cargo run --release           # unified build: console TUI + CPU-graphics window
+cargo run --release -- --gui  # boot straight into the window
 ```
 
 Run it from a real terminal (it's a full-screen TUI). A window of about
 **80×24 or larger** is recommended — the walking-duck and smash animations fall
-back to a plain text view on very small windows.
+back to a plain text view on very small windows. Choosing **CPU Graphics** on the
+start screen opens the native window; choosing console in the window's start
+screen returns you to the TUI. (Each switch launches a fresh process for the
+other view — a clean process gets proper keyboard focus, which an in-process
+switch doesn't reliably get on Windows.)
+
+For a lean, console-only binary (no window deps — this is what the static musl
+Chromebook builds use):
+
+```sh
+cargo run --release --no-default-features
+```
 
 ```sh
 cargo test     # unit tests, including render-never-panics across screen sizes
@@ -220,14 +230,17 @@ today:**
 - Practice and timed Challenge modes.
 - Per-student profiles, a whole-journey progress screen, and the password-gated
   Teacher Area with per-section Why? examples and records administration.
+- **CPU Graphics mode** — a software-rendered **window** (CPU only, never a GPU)
+  that draws the *whole* app in pixels: every section's figures, Deduction Duck
+  and his animated number-line / smash strategies, all the transitions, and the
+  milestone cinematics. It's the **same single binary** — pick "CPU Graphics" on
+  the start screen (or `--gui`) and the window opens; pick console graphics in the
+  window and the terminal comes back. The domain layer is renderer-agnostic so
+  both frontends drive the very same core.
 
-**Shelved / coming soon:**
+**Coming soon:**
 
-- **CPU Graphics mode** — a future software-rendered (2D/3D) frontend, *CPU
-  only, never requiring a GPU*. The startup picker already offers it, and the
-  domain layer (problems, strategies, transitions-as-data, students) is kept
-  deliberately renderer-agnostic so a second frontend can slot in behind the
-  same core. For now, **Low Graphics (console)** is the supported mode.
+- Software **3-D** in the CPU-graphics window, a **web/WASM** build, and
 - More strategy visualisations, more section types, and richer student
   insights.
 

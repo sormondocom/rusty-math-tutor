@@ -2117,10 +2117,13 @@ fn draw_geo(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), g: &Geometr
             text_centered(pm, cx, by + 14.0, 1.5, &label, GRAY);
         }
         GeoShape::Circle { r } => {
-            let rad = rh.min(rw / 2.0) * 0.78 * (0.55 + (r.clamp(2, 9) as f32) / 22.0);
-            circle(pm, cx, cy, rad, ACCENT, 3.0);
-            line(pm, cx, cy, cx + rad, cy, YELLOW, 2.0); // the radius
-            text_centered(pm, cx, cy + rad + 16.0, 1.5, &format!("radius {} cm", r), GRAY);
+            // Cap to half the band (less the label row) so the disc stays inside
+            // the band and never reaches up into the question text above it.
+            let max_rad = (rh * 0.5 - 26.0).min(rw * 0.5).max(8.0);
+            let rad = max_rad * (0.62 + (r.clamp(2, 9) as f32) / 30.0).min(1.0);
+            circle(pm, cx, cy - 8.0, rad, ACCENT, 3.0);
+            line(pm, cx, cy - 8.0, cx + rad, cy - 8.0, YELLOW, 2.0); // the radius
+            text_centered(pm, cx, cy + rad - 2.0, 1.5, &format!("radius {} cm", r), GRAY);
         }
         GeoShape::Box3 { l, w, h } => {
             let fw = (rw * 0.42).min(rh * 1.2);
