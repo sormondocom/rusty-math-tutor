@@ -1,6 +1,6 @@
 [package]
 name = "rusty-math-tutor"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A console math tutor (K-8) with pleasing random transitions between problems"
 license = "GPL-3.0"
