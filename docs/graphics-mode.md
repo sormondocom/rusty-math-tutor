@@ -225,7 +225,7 @@ feature so the default terminal build stays lean and `musl`-static.
 - [x] Launch with `cargo run --features gui -- --gui` (terminal stays the
       default). Persists via `App::persist` on exit.
 
-**Slice 2 — render the screens — _in progress_**
+**Slice 2 — render the screens — ✅ done**
 - [x] Real **TTF text via `ab_glyph`**: a system font is loaded at runtime
       (Segoe UI / Arial / Verdana on Windows, DejaVu / Liberation on Linux,
       Arial on macOS) and glyphs are rasterised to alpha coverage and blended in.
@@ -246,9 +246,26 @@ feature so the default terminal build stays lean and `musl`-static.
       and the window step box-averages each `SS×SS` block back down. The averaging
       *is* the AA — smooth shapes and glyph edges, never touching the buggy path.
       Degenerate paths are still guarded.
-- [ ] Remaining per-section visuals (fraction/percent shaded shapes, units prop),
-      the duck, transitions, and the placeholder screens (Settings/Stats/Teacher/
-      Cinematic/Experiment).
+- [x] **Every screen is now rendered** — no placeholders left:
+      - **Settings / My Progress / Teacher Area / Experiment** full screens (the
+        Teacher records table, the Why?-examples add-box, the unit explorer).
+      - **Per-section figures** in the card: fraction/percent shaded shapes that
+        materialise piece by piece (pie wedges, triangle strips, bar, grid),
+        arithmetic horizontal / stacked / long-division layouts (so **V** works),
+        and a themed **units prop** (cup, pool, bottle, scale, ruler, coin).
+      - **Deduction Duck** (`H`): the slide-up hint panel for every section, the
+        animated **number-line walk** and **smash** strategy visuals for
+        arithmetic, the **Why?** overlay (`Y`), the unit duck-jump gag, and the
+        explorer "Whoa/BOOM" reaction. The ASCII sprites render as monospaced
+        pixels.
+      - **Transitions**: all 7 reveals as per-pixel blends, plus pixel ports of
+        the 6 particle effects (explode/swirl shatter the card into flying tiles;
+        fireworks/starburst/alien-ships/asteroids as deterministic overlays on a
+        crossfade backdrop), driven by the core's `TransitionPhase`.
+      - **Milestone cinematics**: the Text, NameSky (comet stream + rising moon),
+        and RocketName (rockets igniting each letter + blue comet) scenes, with
+        Deduction Duck gazing up in `Awe`, and scene-to-scene transitions reusing
+        the same blend engine.
 
 **Slice 3 — ship it ✅ done**
 - [x] `GraphicsMode::Cpu::available()` is true when built `--features gui`, and
