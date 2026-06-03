@@ -19,11 +19,13 @@ Grab a ready-to-run program from the [**latest release**](https://github.com/sor
 
 | Your device | Download |
 |-------------|----------|
-| **Windows** (most PCs) | [rusty-math-tutor-windows-x86_64.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64.exe) |
+| **Windows** — terminal (most PCs) | [rusty-math-tutor-windows-x86_64.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64.exe) |
+| **Windows** — CPU graphics *window* | [rusty-math-tutor-windows-x86_64-gui.exe](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-windows-x86_64-gui.exe) |
 | **Chromebook** — Intel / AMD | [rusty-math-tutor-linux-x86_64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-x86_64) |
 | **Chromebook** — ARM | [rusty-math-tutor-linux-aarch64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-aarch64) |
 
-- **Windows:** double-click the `.exe`, or run it from a terminal. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
+- **Windows (terminal):** double-click the `.exe`, or run it from a terminal. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
+- **Windows (CPU graphics window):** the `-gui` build opens a real window with software-rendered 2-D graphics — **no GPU required**. Same app, drawn in pixels. (Pick "CPU Graphics" on the start screen to make it the default, or run with `--gui`.)
 - **Chromebook:** these run in the built-in **Linux (Crostini)** environment — turn it on at *Settings → Advanced → Developers → Linux development environment*, then in the Linux terminal:
   ```sh
   chmod +x rusty-math-tutor-linux-x86_64   # the file you downloaded

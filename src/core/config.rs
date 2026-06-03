@@ -39,13 +39,18 @@ impl GraphicsMode {
     pub fn name(self) -> &'static str {
         match self {
             GraphicsMode::Low => "Low Graphics (console)",
+            GraphicsMode::Cpu if cfg!(feature = "gui") => "CPU Graphics (window)",
             GraphicsMode::Cpu => "CPU Graphics (coming soon)",
         }
     }
 
-    /// Whether this mode is actually implemented yet.
+    /// Whether this mode can actually run in this build.  CPU graphics needs the
+    /// `gui` Cargo feature (winit + softbuffer + tiny-skia).
     pub fn available(self) -> bool {
-        matches!(self, GraphicsMode::Low)
+        match self {
+            GraphicsMode::Low => true,
+            GraphicsMode::Cpu => cfg!(feature = "gui"),
+        }
     }
 }
 

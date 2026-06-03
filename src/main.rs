@@ -60,6 +60,11 @@ mod transition;
 #[path = "frontends/terminal/ui.rs"]
 mod ui;
 
+// --- CPU graphics frontend (feature = "gui"): winit + softbuffer + tiny-skia ---
+#[cfg(feature = "gui")]
+#[path = "frontends/gui/mod.rs"]
+mod gui;
+
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -81,15 +86,23 @@ use storage::Storage;
 const TICK: Duration = Duration::from_millis(33);
 
 fn main() -> Result<()> {
+    let storage: Box<dyn Storage> = Box::new(FileStorage);
+    let config = Config::load(storage.as_ref());
+
+    // CPU graphics (feature = "gui"): launch the native window when it's the
+    // saved preference (set in the Startup picker) or forced with `--gui`.
+    #[cfg(feature = "gui")]
+    if config.graphics == config::GraphicsMode::Cpu || std::env::args().any(|a| a == "--gui") {
+        return gui::run(App::new(config, storage));
+    }
+
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal);
+    let result = run(&mut terminal, config, storage);
     restore_terminal(&mut terminal)?;
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    let storage: Box<dyn Storage> = Box::new(FileStorage);
-    let config = Config::load(storage.as_ref());
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, config: Config, storage: Box<dyn Storage>) -> Result<()> {
     let mut app = App::new(config, storage);
     let mut last_tick = Instant::now();
     // Terminal-frontend render state: the captured pixels for any in-flight

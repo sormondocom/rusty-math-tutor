@@ -43,21 +43,32 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Terminal builds (default feature set) — small, static where possible.
           - label: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            features: ""
             bin: tutor.exe
             asset: rusty-math-tutor-windows-x86_64.exe
           - label: chromebook-linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            features: ""
             bin: tutor
             asset: rusty-math-tutor-linux-x86_64
           - label: chromebook-linux-aarch64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            features: ""
             bin: tutor
             asset: rusty-math-tutor-linux-aarch64
+          # CPU graphics build — a native window (winit + softbuffer + tiny-skia).
+          - label: windows-x86_64-gui
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: "--features gui"
+            bin: tutor.exe
+            asset: rusty-math-tutor-windows-x86_64-gui.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -72,10 +83,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.label }}
 
       - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.features }}
 
       - name: Stage binary
         shell: bash

@@ -210,12 +210,53 @@ A terminal-frontend-only fidelity bump — no core changes, no new deps, still o
   render as tofu on minimal terminals — against the "runs everywhere" goal).
 - The canvas is reusable for future sub-cell work (cinematic particles, etc.).
 
-### Phase 2 — Native CPU window, 2D
+### Phase 2 — Native CPU window, 2D — _in progress_
 
-- [ ] `frontends/gui` with `winit` + `softbuffer`.
-- [ ] `rasterize/` 2D via `tiny-skia`; CPU glyphs via `fontdue`/`ab_glyph`.
-- [ ] Map every `Renderer` 2D primitive to pixels; port the cards, duck, menus.
-- [ ] Ship `GraphicsMode::Cpu` for real on **Windows desktop** first.
+A separate pixel frontend that reads the same `&App`, behind a `gui` Cargo
+feature so the default terminal build stays lean and `musl`-static.
+
+**Slice 1 — pipeline ✅ done**
+- [x] `gui` feature → optional `winit` 0.30 + `softbuffer` 0.4 + `tiny-skia` 0.11
+      (default build unaffected; 47 tests still green).
+- [x] `src/frontends/gui/mod.rs`: opens a window, maps `winit` keys →
+      `InputEvent`, drives `App::on_tick` on the 33 ms clock, paints a CPU
+      `tiny-skia` frame and presents it via `softbuffer`. Compiles clean against
+      the real APIs.
+- [x] Launch with `cargo run --features gui -- --gui` (terminal stays the
+      default). Persists via `App::persist` on exit.
+
+**Slice 2 — render the screens — _in progress_**
+- [x] Real **TTF text via `ab_glyph`**: a system font is loaded at runtime
+      (Segoe UI / Arial / Verdana on Windows, DejaVu / Liberation on Linux,
+      Arial on macOS) and glyphs are rasterised to alpha coverage and blended in.
+      The public-domain **`font8x8`** bitmap is the fallback when no font is found
+      (its ASCII-only `× ÷ − π ² ³` map to `x / - P 2 3`). A gui-gated test pins
+      that text renders and that widths grow with length.
+- [x] `src/frontends/gui/scene.rs`: the **Startup → Menu → Practice/Challenge**
+      path is rendered for real — the window is navigable and playable. Reads the
+      same `&App` the terminal does (menu rows, `Active` question, typed answer,
+      feedback). The menu highlight bar is sized to the widest row so no label
+      clips.
+- [x] Geometry shapes as **tiny-skia paths** (circle, triangle, rect, wireframe
+      box), scaled to real dimensions — pixels are square here, so no aspect
+      fudge. Drawn in the Practice card.
+- [x] **Anti-aliasing via supersampling** (the fix for tiny-skia 0.11.4's
+      AA rasteriser panic, `hairline_aa.rs assertion failed`): the whole scene is
+      rendered into a pixmap scaled up by `scene::SS` (3×) with `anti_alias` *off*,
+      and the window step box-averages each `SS×SS` block back down. The averaging
+      *is* the AA — smooth shapes and glyph edges, never touching the buggy path.
+      Degenerate paths are still guarded.
+- [ ] Remaining per-section visuals (fraction/percent shaded shapes, units prop),
+      the duck, transitions, and the placeholder screens (Settings/Stats/Teacher/
+      Cinematic/Experiment).
+
+**Slice 3 — ship it ✅ done**
+- [x] `GraphicsMode::Cpu::available()` is true when built `--features gui`, and
+      the Startup picker offers "CPU Graphics (window)".
+- [x] `main.rs` launches the window when CPU is the saved preference (or `--gui`)
+      — set it from the picker, it sticks. Terminal stays the default build.
+- [x] Release workflow builds a **`...-windows-x86_64-gui.exe`** artifact
+      (`--features gui`); README links it. 47 tests green; both builds clean.
 
 ### Phase 3 — Software 3D
 
