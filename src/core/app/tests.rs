@@ -511,13 +511,15 @@ fn geometry_card_draws_hollow_shapes() {
     assert!(rect.contains("Geometry") && rect.contains('┌') && rect.contains('┐'));
     assert!(rect.contains('8') && rect.contains('5'), "rectangle dimensions are labelled");
 
-    // Triangle: contiguous / \ slopes and a base/height label line.
+    // Triangle: a half-block outline (▀/▄/█) and a base/height label line.
     let tri = render(&GeometryProblem { measure: Measure::Area, shape: GeoShape::Triangle { base: 6, height: 4, sides: None }, answer: 12, unit: "cm²", pi: false, hint: vec![] });
-    assert!(tri.contains('/') && tri.contains('\\') && tri.contains("base 6 cm"));
+    assert!(tri.contains("base 6 cm"), "triangle labels its base/height");
+    assert!(tri.contains('▀') || tri.contains('▄') || tri.contains('█'), "triangle drawn with half-block pixels");
 
-    // Circle: an outline labelled with its radius, answered in terms of π.
+    // Circle: a half-block outline labelled with its radius, answered in π.
     let circ = render(&GeometryProblem { measure: Measure::Area, shape: GeoShape::Circle { r: 6 }, answer: 36, unit: "cm²", pi: true, hint: vec![] });
     assert!(circ.contains("radius 6 cm") && circ.contains("π"), "circle shows its radius and π");
+    assert!(circ.contains('▀') || circ.contains('▄') || circ.contains('█'), "circle drawn with half-block pixels");
 
     // Box: a wireframe cuboid with its dimensions labelled.
     let bx = render(&GeometryProblem { measure: Measure::Volume, shape: GeoShape::Box3 { l: 4, w: 3, h: 5 }, answer: 60, unit: "cm³", pi: false, hint: vec![] });

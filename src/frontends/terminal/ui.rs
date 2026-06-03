@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 use ratatui::Frame;
 
 use crate::app::{App, Cinematic, Feedback, Screen, TeacherView};
+use crate::canvas::Canvas;
 use crate::config::Layout;
 use crate::duck::Pose;
 use crate::font;
@@ -533,60 +534,47 @@ fn draw_geo_rect(buf: &mut Buffer, band: Rect, w: i64, h: i64) {
 /// so the edges never break up), labelled with its base+height (area) or its
 /// three side lengths (perimeter).
 fn draw_geo_triangle(buf: &mut Buffer, band: Rect, base: i64, height: i64, sides: Option<[i64; 3]>) {
-    let style = Style::default().fg(GEO_ACCENT);
-    let rows = band.height.saturating_sub(3).clamp(3, 7);
-    let cx = band.left() + band.width / 2;
-    let y0 = band.top() + band.height.saturating_sub(rows + 1) / 2;
-
-    for r in 0..rows {
-        let lx = cx.saturating_sub(r);
-        let rx = cx + r + 1;
-        if r == 0 {
-            put_str(buf, cx, y0, "/\\", style);
-        } else if r == rows - 1 {
-            put_str(buf, lx, y0 + r, "/", style);
-            put_str(buf, lx + 1, y0 + r, "_".repeat(rx.saturating_sub(lx + 1) as usize), style);
-            put_str(buf, rx, y0 + r, "\\", style);
-        } else {
-            put_str(buf, lx, y0 + r, "/", style);
-            put_str(buf, rx, y0 + r, "\\", style);
-        }
+    // Draw the outline on a half-block canvas so the slopes come out smooth.
+    let cell_rows = band.height.saturating_sub(2).clamp(3, 12);
+    let mut cv = Canvas::new(band.width, cell_rows);
+    let px_h = cv.rows() as i32;
+    let cx = (cv.cols() / 2) as i32;
+    let (top, bot) = (1, px_h - 2);
+    // Isosceles; base half-width tracks the height (square pixels keep the
+    // slopes natural), clamped to the canvas.
+    let half = (bot - top).clamp(2, cx - 1);
+    cv.line(cx, top, cx - half, bot, GEO_ACCENT); // left slope
+    cv.line(cx, top, cx + half, bot, GEO_ACCENT); // right slope
+    cv.line(cx - half, bot, cx + half, bot, GEO_ACCENT); // base
+    // For an area triangle, drop the height down the middle to match the label.
+    if sides.is_none() {
+        cv.line(cx, top, cx, bot, GEO_DIM);
     }
+    cv.blit(buf, band.left(), band.top());
 
     let label = match sides {
         Some([a, b, c]) => format!("sides: {}, {}, {} cm", a, b, c),
         None => format!("base {} cm,  height {} cm", base, height),
     };
-    put_str(buf, center(band, label.chars().count() as u16), y0 + rows, &label, Style::default().fg(GEO_DIM));
+    put_str(buf, center(band, label.chars().count() as u16), band.top() + cell_rows + 1, &label, Style::default().fg(GEO_DIM));
 }
 
-/// A hollow circle, drawn in a clean hand-rounded outline sized to its radius,
-/// with the radius labelled.  Circumference / area are asked in terms of π.
+/// A hollow circle on a half-block canvas — a genuinely round outline sized to
+/// its radius, with a radius spoke and label.  Circumference / area are asked
+/// in terms of π.
 fn draw_geo_circle(buf: &mut Buffer, band: Rect, r: i64) {
-    let style = Style::default().fg(GEO_ACCENT);
-    // Pick a circle that fits the band; smaller radii get the smaller art.
-    let small: &[&str] = &[" .--. ", "/    \\", "\\    /", " '--' "];
-    let medium: &[&str] = &[" .---. ", "/     \\", "|     |", "\\     /", " '---' "];
-    let large: &[&str] = &["  .----.  ", " /      \\ ", "|        |", "|        |", " \\      / ", "  '----'  "];
-    let art = if r <= 3 || band.height < 6 {
-        small
-    } else if r <= 6 || band.height < 7 {
-        medium
-    } else {
-        large
-    };
+    let cell_rows = band.height.saturating_sub(2).clamp(3, 12);
+    let mut cv = Canvas::new(band.width, cell_rows);
+    let (cx, cy) = ((cv.cols() / 2) as i32, cv.rows() as i32 / 2);
+    let fit = cx.min(cy).saturating_sub(1).max(2);
+    // Grow a little with r (2..=9), but keep it filling the band.
+    let rad = (fit * ((r as i32).clamp(2, 9) + 11) / 20).clamp(2, fit);
+    cv.circle(cx, cy, rad, GEO_ACCENT);
+    cv.line(cx, cy, cx + rad, cy, GEO_DIM); // radius spoke
+    cv.blit(buf, band.left(), band.top());
 
-    let bw = art.iter().map(|l| l.chars().count()).max().unwrap_or(1) as u16;
-    let x0 = center(band, bw);
-    let y0 = band.top() + band.height.saturating_sub(art.len() as u16 + 1) / 2;
-    for (i, line) in art.iter().enumerate() {
-        put_str(buf, x0, y0 + i as u16, line, style);
-    }
-
-    // Centre dot and the radius label beneath.
-    put_str(buf, x0 + bw / 2, y0 + art.len() as u16 / 2, "·", Style::default().fg(GEO_DIM));
     let label = format!("radius {} cm", r);
-    put_str(buf, center(band, label.chars().count() as u16), y0 + art.len() as u16 + 1, &label, Style::default().fg(GEO_DIM));
+    put_str(buf, center(band, label.chars().count() as u16), band.top() + cell_rows + 1, &label, Style::default().fg(GEO_DIM));
 }
 
 /// A crisp wireframe cuboid (or cube) in cabinet projection, scaled to its

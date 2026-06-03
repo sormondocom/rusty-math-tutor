@@ -194,11 +194,21 @@ A second frontend (Phase 2 GUI, Phase 4 web) drops in beside
 `frontends/terminal/`: it feeds `App::on_event`, reads `&App` to render, and
 provides its own `Storage` — touching no core code.
 
-### Phase 1 — Enhanced terminal (optional quick win)
+### Phase 1 — Enhanced terminal ✅ done _(reshaped: no shared `Renderer`)_
 
-- [ ] Render the same `Renderer` calls with half-blocks/braille for ~2× vertical
-      resolution. Validates the abstraction; still one `musl`-static binary; no
-      window, no new deps.
+A terminal-frontend-only fidelity bump — no core changes, no new deps, still one
+`musl`-static binary.
+
+- [x] `frontends/terminal/canvas.rs`: a reusable **half-block** (`▀▄█`) raster
+      surface. Two sub-pixels per cell (top/bottom, coloured via fg/bg) → 2×
+      vertical resolution and ~square pixels, so circles look round. Primitives:
+      `set` / `line` (Bresenham) / `circle` (midpoint) / `blit`.
+- [x] Smooth Geometry shapes: the circle is now a true round midpoint circle with
+      a radius spoke; the triangle has clean Bresenham slopes (and a height line
+      for area problems). Rectangle and 3-D box stay box-drawing (already crisp).
+- Chose **half-blocks over braille** for universal terminal support (braille can
+  render as tofu on minimal terminals — against the "runs everywhere" goal).
+- The canvas is reusable for future sub-cell work (cinematic particles, etc.).
 
 ### Phase 2 — Native CPU window, 2D
 

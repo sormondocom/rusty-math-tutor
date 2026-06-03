@@ -47,6 +47,8 @@ mod topic;
 mod units;
 
 // --- terminal frontend: the cell renderer + its transition visuals ---
+#[path = "frontends/terminal/canvas.rs"]
+mod canvas;
 #[path = "frontends/terminal/duck.rs"]
 mod duck;
 #[path = "frontends/terminal/font.rs"]
