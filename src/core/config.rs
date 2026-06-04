@@ -54,6 +54,44 @@ impl GraphicsMode {
     }
 }
 
+/// Visual theme for the CPU-graphics window (its palette / "look").  The console
+/// renderer has its own fixed styling and ignores this.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Theme {
+    /// The standard dark-slate palette.
+    Default,
+    /// White chalk on a black board.
+    Blackboard,
+    /// White chalk on a dark-green board.
+    Chalkboard,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme::Default
+    }
+}
+
+impl Theme {
+    /// Every theme, in cycle order.
+    pub const ALL: [Theme; 3] = [Theme::Default, Theme::Blackboard, Theme::Chalkboard];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::Default => "Default",
+            Theme::Blackboard => "Blackboard",
+            Theme::Chalkboard => "Chalkboard",
+        }
+    }
+
+    /// The next theme `dir` steps along (wrapping), for the Settings cycler.
+    pub fn cycled(self, dir: i32) -> Theme {
+        let n = Self::ALL.len() as i32;
+        let i = Self::ALL.iter().position(|&t| t == self).unwrap_or(0) as i32;
+        Self::ALL[(((i + dir) % n + n) % n) as usize]
+    }
+}
+
 /// How a problem is presented on the card.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Layout {
@@ -118,6 +156,9 @@ pub struct Config {
     /// Measurement locality for the Units of Measure section.
     #[serde(default)]
     pub locality: crate::units::Locality,
+    /// Visual theme for the CPU-graphics window.
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl Default for Config {
@@ -142,6 +183,7 @@ impl Default for Config {
             graphics: GraphicsMode::Low,
             teacher: None,
             locality: crate::units::Locality::UnitedStates,
+            theme: Theme::Default,
         }
     }
 }

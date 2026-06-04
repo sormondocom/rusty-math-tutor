@@ -21,13 +21,15 @@ const CHALLENGE_LEN: Duration = Duration::from_secs(60);
 /// Maximum digits a student can type for an answer.
 const MAX_INPUT: usize = 7;
 /// Number of selectable rows on the menu.
-const MENU_ITEMS: usize = 17;
+const MENU_ITEMS: usize = 16;
 /// Ticks per shape region while a fraction shape materialises.
 const FRAC_MAT_PER_REGION: u32 = 6;
 /// Editable fields on the Experimentation explorer.
 const EXP_FIELDS: usize = 4;
-/// Editable rows on the Settings screen (grade + four range knobs).
-pub const SETTINGS_FIELDS: usize = 5;
+/// Editable rows on the Settings screen (grade + four range knobs + layout + theme).
+pub const SETTINGS_FIELDS: usize = 7;
+/// Ticks over which a fresh problem "draws on" (blackboard theme write-on).
+pub const CARD_DRAW_TICKS: u32 = 15;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Screen {
@@ -69,13 +71,12 @@ const MI_UNITS: usize = 6;
 const MI_FRACTIONS: usize = 7;
 const MI_PERCENTS: usize = 8;
 const MI_GEOMETRY: usize = 9;
-const MI_LAYOUT: usize = 10;
-const MI_SETTINGS: usize = 11;
-const MI_PROGRESS: usize = 12;
-const MI_TEACHER: usize = 13;
-const MI_PRACTICE: usize = 14;
-const MI_CHALLENGE: usize = 15;
-const MI_EXPERIMENT: usize = 16;
+const MI_SETTINGS: usize = 10;
+const MI_PROGRESS: usize = 11;
+const MI_TEACHER: usize = 12;
+const MI_PRACTICE: usize = 13;
+const MI_CHALLENGE: usize = 14;
+const MI_EXPERIMENT: usize = 15;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Feedback {
@@ -193,6 +194,9 @@ pub struct App {
 
     /// Ticks the current shape (fraction / percent) has been materialising.
     pub frac_anim: u32,
+    /// Ticks since the current problem became current — drives the blackboard
+    /// "draw-on" of the first problem (later ones are written by the transition).
+    pub card_anim: u32,
 
     // Transition between the answered card and the next one.  The core tracks
     // only the timing/phase; the terminal frontend owns the captured pixels.
@@ -300,6 +304,7 @@ impl App {
             exp_to: 0,
             exp_field: 0,
             frac_anim: 0,
+            card_anim: CARD_DRAW_TICKS,
             input: String::new(),
             feedback: Feedback::None,
             transition: None,
@@ -406,6 +411,16 @@ impl App {
         if self.current.materializes() && self.transition.is_none() {
             self.frac_anim = self.frac_anim.saturating_add(1);
         }
+        // The fresh-problem "draw-on" clock advances while no transition plays.
+        if self.transition.is_none() {
+            self.card_anim = self.card_anim.saturating_add(1);
+        }
+    }
+
+    /// How far the current problem has "drawn on", `0.0..=1.0` (blackboard theme).
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn card_progress(&self) -> f32 {
+        (self.card_anim as f32 / CARD_DRAW_TICKS as f32).min(1.0)
     }
 
     /// Advance the milestone cinematic: dwell on each scene, then transition to
@@ -536,7 +551,6 @@ impl App {
                     let op = i - *MI_OPS.start();
                     self.menu_ops[op] = !self.menu_ops[op];
                 }
-                MI_LAYOUT => self.config.layout = self.config.layout.toggled(),
                 MI_SETTINGS => self.open_settings(),
                 MI_PROGRESS => self.screen = Screen::Stats,
                 MI_TEACHER => self.open_teacher(),
@@ -778,13 +792,26 @@ impl App {
     /// Nudge the selected Settings value up (`up`) or down.  Range knobs step
     /// by a fraction of their size so they move quickly when large.
     fn adjust_setting(&mut self, up: bool) {
-        if self.settings_field == 0 {
-            self.settings_grade = if up {
-                (self.settings_grade + 1).min(8)
-            } else {
-                self.settings_grade.saturating_sub(1)
-            };
-            return;
+        // Config-level rows (not per-grade range knobs) are handled first, before
+        // the mutable borrow of the grade range below.
+        match self.settings_field {
+            0 => {
+                self.settings_grade = if up {
+                    (self.settings_grade + 1).min(8)
+                } else {
+                    self.settings_grade.saturating_sub(1)
+                };
+                return;
+            }
+            5 => {
+                self.config.layout = self.config.layout.toggled();
+                return;
+            }
+            6 => {
+                self.config.theme = self.config.theme.cycled(if up { 1 } else { -1 });
+                return;
+            }
+            _ => {}
         }
         let grade = self.settings_grade;
         let r = self.config.range_mut(grade);
@@ -985,6 +1012,7 @@ impl App {
         // Pick the first problem (arithmetic or measurement).
         self.generate_pending();
         self.commit_pending();
+        self.card_anim = 0; // the very first problem draws itself on
     }
 
     fn to_menu(&mut self) {
@@ -1106,6 +1134,9 @@ impl App {
             }
             self.current = next;
         }
+        // Reached here via a transition, which already drew the new card on, so
+        // skip the draw-on (start_session resets this for the very first problem).
+        self.card_anim = CARD_DRAW_TICKS;
         // Fresh problem: hide the answer and clear any reprimand escalation.
         self.revealed = false;
         self.reprimand = None;

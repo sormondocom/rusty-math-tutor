@@ -1010,7 +1010,6 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push((format!("{} Fractions", mark(app.menu_fractions)), "(shapes & pieces)"));
     items.push((format!("{} Percentages", mark(app.menu_percents)), "(shapes out of 100)"));
     items.push((format!("{} Geometry", mark(app.menu_geometry)), "(perimeter, area, volume)"));
-    items.push((format!("Show problems:  {}", app.config.layout.name()), "(Enter to switch)"));
     items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
     items.push(("My Progress...".to_string(), "(Enter to view)"));
     items.push(("Teacher Area...".to_string(), "(password)"));
@@ -1417,6 +1416,8 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         ("Multiply factors up to".to_string(), format!("< {} >", r.mul_max)),
         ("Divide numbers up to".to_string(), format!("< {} >", r.div_max)),
         ("Allow negative answers".to_string(), format!("< {} >", if r.allow_negative { "Yes" } else { "No" })),
+        ("Show problems".to_string(), format!("< {} >", app.config.layout.name())),
+        ("Theme (graphics mode)".to_string(), format!("< {} >", app.config.theme.name())),
     ];
 
     let mut y = area.top() + 6;

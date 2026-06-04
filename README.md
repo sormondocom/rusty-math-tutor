@@ -158,9 +158,10 @@ Choose a graphics mode (see *Current state* below), then **Enter**.
 | `Q` | Quit |
 
 Rows: **Student**, **Grade**, the four **operation toggles**, **Units of
-Measure**, **Fractions**, **Percentages**, **Geometry**, **Show problems**
-(layout), **Settings**, **My Progress**, **Teacher Area**, **Start Practice**,
-**Start Challenge**, **Experimentation**.
+Measure**, **Fractions**, **Percentages**, **Geometry**, **Settings**, **My
+Progress**, **Teacher Area**, **Start Practice**, **Start Challenge**,
+**Experimentation**. (The problem **layout** — horizontal / stacked — now lives
+in **Settings**, alongside the number ranges and theme.)
 
 ### Practice / Challenge
 | Key | Action |

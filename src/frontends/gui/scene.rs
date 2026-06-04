@@ -11,6 +11,7 @@
 //! * **A real font.** Text uses a TTF via `ab_glyph` when a system font can be
 //!   found, falling back to the public-domain 8×8 bitmap font.
 
+use std::cell::Cell;
 use std::sync::OnceLock;
 
 use ab_glyph::{Font, FontVec, ScaleFont};
@@ -18,7 +19,7 @@ use font8x8::UnicodeFonts;
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PremultipliedColorU8, Rect, Stroke, Transform};
 
 use crate::app::{App, Feedback, Screen, TeacherView, ANECDOTE_MAX};
-use crate::fraction::FractionProblem;
+use crate::fraction::{FractionProblem, Mode};
 use crate::geometry::{GeometryProblem, GeoShape};
 use crate::section::Active;
 use crate::shapes::Shape;
@@ -45,28 +46,249 @@ const MAGENTA: Rgb = [200, 140, 230];
 const DUCK: Rgb = [245, 205, 70];
 const STAGE_BG: Rgb = [22, 24, 36];
 
+// ---------------------------------------------------------------------------
+// Themes — applied at the pixel-write layer so the whole palette re-tints with
+// no change to any drawing call site.  `render()` sets the active theme; `col`,
+// `blend`, and `fill_dev` (the only Rgb→pixel chokepoints) run colours through
+// `themed()` first.
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    static THEME: Cell<crate::config::Theme> = const { Cell::new(crate::config::Theme::Default) };
+}
+
+fn set_theme(t: crate::config::Theme) {
+    THEME.with(|c| c.set(t));
+}
+
+fn cur_theme() -> crate::config::Theme {
+    THEME.with(|c| c.get())
+}
+
+/// Whether a chalk-on-board theme is active (Blackboard or Chalkboard).
+fn is_chalk() -> bool {
+    matches!(cur_theme(), crate::config::Theme::Blackboard | crate::config::Theme::Chalkboard)
+}
+
+/// Perceived brightness of a colour (Rec. 601 luma).
+fn luma(c: Rgb) -> f32 {
+    0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32
+}
+
+const CHALK_WHITE: Rgb = [236, 234, 222];
+
+/// The board's darkest tone for the active chalk theme (black, or dark green).
+fn board_dark() -> Rgb {
+    match cur_theme() {
+        crate::config::Theme::Chalkboard => [16, 40, 28],
+        _ => [9, 9, 11],
+    }
+}
+
+/// The board's faintly-lifted tone (cards / selection sit on this).
+fn board_panel() -> Rgb {
+    match cur_theme() {
+        crate::config::Theme::Chalkboard => [26, 56, 41],
+        _ => [22, 22, 26],
+    }
+}
+
+/// Re-tint a default-palette colour as chalk on a board: dark colours become the
+/// board slate (darker → darker); everything bright becomes **white chalk** (no
+/// colour), with a little tonal range so secondary text still reads as dimmer.
+/// The grainy, dusty *texture* is added afterwards by [`chalk_texture`].
+fn chalkify(c: Rgb) -> Rgb {
+    let l = luma(c);
+    if l < 70.0 {
+        lerp_rgb(board_dark(), board_panel(), (l / 70.0).clamp(0.0, 1.0))
+    } else {
+        // Brighter source = harder chalk press = whiter; all neutral (no hue).
+        let t = ((l - 70.0) / 185.0).clamp(0.5, 1.0);
+        lerp_rgb([196, 196, 190], CHALK_WHITE, t)
+    }
+}
+
+/// Map a colour through the active theme.
+fn themed(c: Rgb) -> Rgb {
+    if is_chalk() {
+        chalkify(c)
+    } else {
+        c
+    }
+}
+
 fn col(c: Rgb) -> Color {
+    let c = themed(c);
     Color::from_rgba8(c[0], c[1], c[2], 255)
 }
+
+/// Frame insets (logical px) for the chalk themes: a wooden border, with a taller
+/// ledge along the bottom for the chalk tray.
+const FRAME_T: u32 = 22;
+const FRAME_TRAY: u32 = 40;
 
 /// Paint a full frame for the app's current screen, into a pixmap that is `SS`×
 /// the logical `(w, h)`.  Drawing is in *logical* coordinates; the low-level
 /// helpers scale up by `SS`.  The window step downscales the result.
 pub fn render(app: &App, w: u32, h: u32) -> Pixmap {
+    set_theme(app.config.theme);
     let mut pm = Pixmap::new((w * SS).max(1), (h * SS).max(1)).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
     pm.fill(col(BG));
-    let (wf, hf) = (w as f32, h as f32);
-    match app.screen {
-        Screen::Startup => draw_startup(&mut pm, app, wf, hf),
-        Screen::Menu => draw_menu(&mut pm, app, wf, hf),
-        Screen::Practice | Screen::Challenge => draw_session(&mut pm, app, wf, hf),
-        Screen::Settings => draw_settings(&mut pm, app, wf, hf),
-        Screen::Stats => draw_stats(&mut pm, app, wf, hf),
-        Screen::Teacher => draw_teacher(&mut pm, app, wf, hf),
-        Screen::Cinematic => draw_cinematic(&mut pm, app, wf, hf),
-        Screen::Experiment => draw_experiment(&mut pm, app, wf, hf),
+
+    if is_chalk() && w > 2 * FRAME_T && h > FRAME_T + FRAME_TRAY {
+        // Render the scene into the inset board area, texture it as chalk, blit it
+        // inside the wooden frame, then paint the frame in the margins.
+        let (iw, ih) = (w - 2 * FRAME_T, h - FRAME_T - FRAME_TRAY);
+        let mut inner = Pixmap::new(iw * SS, ih * SS).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
+        inner.fill(col(BG));
+        draw_screen(&mut inner, app, iw as f32, ih as f32);
+        chalk_texture(&mut inner);
+        blit(&mut pm, &inner, FRAME_T * SS, FRAME_T * SS);
+        draw_board_frame(&mut pm);
+    } else {
+        draw_screen(&mut pm, app, w as f32, h as f32);
     }
     pm
+}
+
+/// Dispatch the active screen into `pm` at logical size `(wf, hf)`.
+fn draw_screen(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    match app.screen {
+        Screen::Startup => draw_startup(pm, app, wf, hf),
+        Screen::Menu => draw_menu(pm, app, wf, hf),
+        Screen::Practice | Screen::Challenge => draw_session(pm, app, wf, hf),
+        Screen::Settings => draw_settings(pm, app, wf, hf),
+        Screen::Stats => draw_stats(pm, app, wf, hf),
+        Screen::Teacher => draw_teacher(pm, app, wf, hf),
+        Screen::Cinematic => draw_cinematic(pm, app, wf, hf),
+        Screen::Experiment => draw_experiment(pm, app, wf, hf),
+    }
+}
+
+/// Copy `src` into `dst` with its top-left at device offset `(ox, oy)`.
+fn blit(dst: &mut Pixmap, src: &Pixmap, ox: u32, oy: u32) {
+    let (dw, dh) = (dst.width(), dst.height());
+    let (sw, sh) = (src.width(), src.height());
+    let spx = src.pixels();
+    let dpx = dst.pixels_mut();
+    for y in 0..sh {
+        let dy = oy + y;
+        if dy >= dh {
+            break;
+        }
+        let drow = (dy * dw) as usize;
+        let srow = (y * sw) as usize;
+        for x in 0..sw {
+            let dx = ox + x;
+            if dx >= dw {
+                break;
+            }
+            dpx[drow + dx as usize] = spx[srow + x as usize];
+        }
+    }
+}
+
+/// Paint the wooden blackboard frame (and its chalk tray) in `pm`'s margins.
+fn draw_board_frame(pm: &mut Pixmap) {
+    let (w, h) = (pm.width() as i32, pm.height() as i32);
+    let t = (FRAME_T * SS) as i32;
+    let tray = (FRAME_TRAY * SS) as i32;
+    let wood = [120, 80, 44];
+    let wood_lo = [84, 54, 28];
+    let wood_hi = [158, 112, 66];
+    let bevel = (3.0 * SSF) as i32;
+
+    // The four wooden borders (the bottom one is the taller tray).
+    fill_raw(pm, 0, 0, w, t, wood);
+    fill_raw(pm, 0, 0, t, h, wood);
+    fill_raw(pm, w - t, 0, t, h, wood);
+    fill_raw(pm, 0, h - tray, w, tray, wood);
+
+    // Subtle grain: faint streaks along each member.
+    for x in (0..w).step_by((7.0 * SSF) as usize + 1) {
+        if hash01(x as u32, 3) > 0.6 {
+            fill_raw(pm, x, 0, bevel.max(1), t, wood_lo);
+            fill_raw(pm, x, h - tray, bevel.max(1), tray, wood_lo);
+        }
+    }
+    for y in (0..h).step_by((7.0 * SSF) as usize + 1) {
+        if hash01(5, y as u32) > 0.6 {
+            fill_raw(pm, 0, y, t, bevel.max(1), wood_lo);
+            fill_raw(pm, w - t, y, t, bevel.max(1), wood_lo);
+        }
+    }
+
+    // Bevels for a little depth: highlight on the outer rim, shadow at the board.
+    fill_raw(pm, 0, 0, w, bevel, wood_hi);
+    fill_raw(pm, 0, 0, bevel, h, wood_hi);
+    fill_raw(pm, w - bevel, 0, bevel, h, wood_lo);
+    fill_raw(pm, t - bevel, t, w - 2 * t + 2 * bevel, bevel, wood_lo); // board top inner edge
+    fill_raw(pm, t - bevel, h - tray, bevel, tray, wood_hi);
+    fill_raw(pm, w - t, h - tray, bevel, tray, wood_lo);
+    fill_raw(pm, t, h - tray, w - 2 * t, bevel, wood_hi); // tray ledge highlight
+
+    // A stick of chalk and a felt eraser resting on the tray.
+    let ty = h - tray + (10.0 * SSF) as i32;
+    fill_raw(pm, w / 2 - (210.0 * SSF) as i32, ty + (4.0 * SSF) as i32, (96.0 * SSF) as i32, (9.0 * SSF) as i32, [242, 240, 230]);
+    let er_x = w / 2 + (120.0 * SSF) as i32;
+    fill_raw(pm, er_x, ty, (74.0 * SSF) as i32, (18.0 * SSF) as i32, [120, 120, 128]);
+    fill_raw(pm, er_x, ty, (74.0 * SSF) as i32, (6.0 * SSF) as i32, [150, 110, 70]);
+}
+
+/// Fill an opaque device-pixel rect with a *raw* (un-themed) colour, clipped.
+fn fill_raw(pm: &mut Pixmap, x: i32, y: i32, w: i32, h: i32, rgb: Rgb) {
+    let (pw, ph) = (pm.width() as i32, pm.height() as i32);
+    let (x0, y0) = (x.max(0), y.max(0));
+    let (x1, y1) = ((x + w).min(pw), (y + h).min(ph));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let px = prem(rgb);
+    let pwu = pm.width();
+    let data = pm.pixels_mut();
+    for yy in y0..y1 {
+        let row = (yy as u32 * pwu) as usize;
+        for xx in x0..x1 {
+            data[row + xx as usize] = px;
+        }
+    }
+}
+
+/// Post-process the rendered frame to make the chalk marks look like *chalk*:
+/// grainy strokes, dusty gaps where the board shows through, and the odd bright
+/// fleck — applied only to foreground pixels (the board itself is left alone).
+/// Runs at supersampled resolution; the downscale then softens it into fine dust.
+fn chalk_texture(pm: &mut Pixmap) {
+    let board = themed(BG);
+    let board_luma = luma(board);
+    let (w, h) = (pm.width(), pm.height());
+    let data = pm.pixels_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) as usize;
+            let p = data[i];
+            let c = [p.red(), p.green(), p.blue()];
+            // Only texture the chalk (anything clearly brighter than the board).
+            if luma(c) - board_luma < 14.0 {
+                continue;
+            }
+            // Coarse grain (features survive the SS downscale) modulates coverage;
+            // a sparse second channel punches dust gaps and bright flecks.  Kept
+            // gentle so small text stays solid rather than ghostly.
+            let grain = 0.84 + 0.16 * hash01(x / 3, y / 3);
+            let speck = hash01(x.wrapping_add(7), y.wrapping_mul(3).wrapping_add(13));
+            let out = if speck < 0.025 {
+                board // a dust gap — board shows through
+            } else if speck > 0.985 {
+                lerp_rgb(c, CHALK_WHITE, 0.6) // a bright fleck of chalk dust
+            } else {
+                lerp_rgb(board, c, grain) // grainy stroke body
+            };
+            if let Some(px) = PremultipliedColorU8::from_rgba(out[0], out[1], out[2], 255) {
+                data[i] = px;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +373,6 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
     v.push(MenuRow::Check(app.menu_fractions, "Fractions".to_string()));
     v.push(MenuRow::Check(app.menu_percents, "Percentages".to_string()));
     v.push(MenuRow::Check(app.menu_geometry, "Geometry".to_string()));
-    v.push(MenuRow::Text(format!("Show problems:  {}", app.config.layout.name())));
     v.push(MenuRow::Text("Settings...".to_string()));
     v.push(MenuRow::Text("My Progress...".to_string()));
     v.push(MenuRow::Text("Teacher Area...".to_string()));
@@ -246,6 +467,17 @@ fn draw_session(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         return;
     }
 
+    // Blackboard: the first problem of a session "draws itself on" (later ones
+    // are written by the eraser transition).  No overlays during the draw-on.
+    if is_chalk() && app.card_progress() < 1.0 && app.help_in == 0.0 && !app.why_active {
+        let (w, h) = (pm.width(), pm.height());
+        let card = card_frame(w, h, |p| {
+            draw_card(p, &app.current, &app.input, app.feedback, app.frac_progress(), app.anim_frame, app.config.layout, wf, hf);
+        });
+        write_on(pm, card.pixels(), app.card_progress());
+        return;
+    }
+
     draw_card(pm, &app.current, &app.input, app.feedback, app.frac_progress(), app.anim_frame, app.config.layout, wf, hf);
     let (cx0, cy0, cw, ch) = card_rect(wf, hf);
 
@@ -291,6 +523,12 @@ fn card_frame(w: u32, h: u32, draw: impl FnOnce(&mut Pixmap)) -> Pixmap {
 /// Blend `from`→`to` (device-resolution pixmaps) into `pm` per `effect`/`t`.
 fn blend_transition(pm: &mut Pixmap, from: &Pixmap, to: &Pixmap, effect: crate::transition::Effect, t: f32) {
     use crate::transition::{Effect, Kind};
+
+    // Chalk themes ignore the random effect: the board is erased, then re-written.
+    if is_chalk() {
+        eraser_transition(pm, from, to, t);
+        return;
+    }
     let (w, h) = (pm.width(), pm.height());
     let (wf, hf) = (w as f32, h as f32);
     let fpx = from.pixels();
@@ -372,6 +610,106 @@ fn hash01(x: u32, y: u32) -> f32 {
     (n & 0xffff) as f32 / 65535.0
 }
 
+/// An opaque premultiplied pixel (alpha 255 → premultiplied == straight).
+fn prem(c: Rgb) -> PremultipliedColorU8 {
+    PremultipliedColorU8::from_rgba(c[0], c[1], c[2], 255).unwrap_or(PremultipliedColorU8::TRANSPARENT)
+}
+
+/// The blackboard transition: a felt eraser wipes the old card away in
+/// back-and-forth strokes (first half), then the new card is "written" on band
+/// by band behind a chalk nib (second half).
+fn eraser_transition(pm: &mut Pixmap, from: &Pixmap, to: &Pixmap, t: f32) {
+    if t < 0.5 {
+        chalk_erase(pm, from.pixels(), (t * 2.0).min(1.0));
+    } else {
+        write_on(pm, to.pixels(), ((t - 0.5) * 2.0).min(1.0));
+    }
+}
+
+const ERASE_BANDS: u32 = 4;
+
+/// Wipe `src` away to the board in back-and-forth strokes, a felt eraser at the
+/// frontier.  `progress` 0..1.
+fn chalk_erase(pm: &mut Pixmap, src: &[PremultipliedColorU8], progress: f32) {
+    let (w, h) = (pm.width(), pm.height());
+    let board = prem(themed(BG));
+    let bh = h as f32 / ERASE_BANDS as f32;
+    let total = (progress * ERASE_BANDS as f32).min(ERASE_BANDS as f32);
+    let cur = (total.floor() as u32).min(ERASE_BANDS - 1);
+    let within = total - cur as f32;
+    {
+        let out = pm.pixels_mut();
+        for y in 0..h {
+            let b = ((y as f32) / bh) as u32;
+            let rtl = b % 2 == 1; // boustrophedon
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let nx = x as f32 / w as f32;
+                let passed = if rtl { nx >= 1.0 - within } else { nx <= within };
+                out[i] = if b < cur || (b == cur && passed) { board } else { src[i] };
+            }
+        }
+    }
+    let band_top = (cur as f32 * bh) as u32;
+    let rtl = cur % 2 == 1;
+    let fx = if rtl { (1.0 - within) * w as f32 } else { within * w as f32 } as i32;
+    draw_eraser_block(pm, fx, band_top, bh as u32, rtl);
+}
+
+/// "Write" `src` on, band by band left-to-right, a chalk nib at the frontier.
+fn write_on(pm: &mut Pixmap, src: &[PremultipliedColorU8], progress: f32) {
+    let (w, h) = (pm.width(), pm.height());
+    let board = prem(themed(BG));
+    let bh = h as f32 / ERASE_BANDS as f32;
+    let total = (progress * ERASE_BANDS as f32).min(ERASE_BANDS as f32);
+    let cur = (total.floor() as u32).min(ERASE_BANDS - 1);
+    let within = total - cur as f32;
+    {
+        let out = pm.pixels_mut();
+        for y in 0..h {
+            let b = ((y as f32) / bh) as u32;
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let nx = x as f32 / w as f32;
+                out[i] = if b < cur || (b == cur && nx <= within) { src[i] } else { board };
+            }
+        }
+    }
+    let band_top = (cur as f32 * bh) as u32;
+    draw_chalk_nib(pm, (within * w as f32) as i32, band_top, bh as u32);
+}
+
+/// A chunky felt eraser (wooden back) trailing the wipe frontier.
+fn draw_eraser_block(pm: &mut Pixmap, fx: i32, band_top: u32, band_h: u32, rtl: bool) {
+    let (w, h) = (pm.width(), pm.height());
+    let ew = (44.0 * SSF) as i32;
+    let (x0, x1) = if rtl { (fx, fx + ew) } else { (fx - ew, fx) };
+    let pad = (6.0 * SSF) as i32;
+    let wood = (12.0 * SSF) as i32;
+    let y0 = band_top as i32 + pad;
+    let y1 = (band_top + band_h) as i32 - pad;
+    let data = pm.pixels_mut();
+    for y in y0.max(0)..y1.min(h as i32) {
+        let felt = if y - y0 < wood { [150, 110, 70] } else { [120, 120, 128] };
+        for x in x0.max(0)..x1.min(w as i32) {
+            data[(y as u32 * w + x as u32) as usize] = prem(felt);
+        }
+    }
+}
+
+/// A small chalk nib at the writing frontier.
+fn draw_chalk_nib(pm: &mut Pixmap, fx: i32, band_top: u32, band_h: u32) {
+    let (w, h) = (pm.width(), pm.height());
+    let r = (5.0 * SSF) as i32;
+    let cy = band_top as i32 + band_h as i32 / 2;
+    let data = pm.pixels_mut();
+    for y in (cy - r).max(0)..(cy + r).min(h as i32) {
+        for x in (fx - r).max(0)..(fx + r).min(w as i32) {
+            data[(y as u32 * w + x as u32) as usize] = prem(CHALK_WHITE);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Particle overlays (device-resolution; deterministic so they need no stored
 // state — re-derived each tick, in lockstep with the core's progress)
@@ -389,6 +727,7 @@ fn rnd(i: u32) -> f32 {
 
 /// Fill an opaque device-pixel rect, clipped to the pixmap.
 fn fill_dev(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, color: Rgb) {
+    let color = themed(color);
     let (pw, ph) = (pm.width(), pm.height());
     let x0 = (x.floor() as i32).max(0);
     let y0 = (y.floor() as i32).max(0);
@@ -421,8 +760,10 @@ fn sample_dev(pm: &Pixmap, x: f32, y: f32) -> Rgb {
 
 /// Near-background tiles are invisible, so we skip flinging them about.
 fn is_bg(c: Rgb) -> bool {
+    // The captured frame is already themed, so compare against the themed bg.
+    let b = themed(BG);
     let d = |a: u8, b: u8| (a as i32 - b as i32).abs();
-    d(c[0], BG[0]) + d(c[1], BG[1]) + d(c[2], BG[2]) < 22
+    d(c[0], b[0]) + d(c[1], b[1]) + d(c[2], b[2]) < 22
 }
 
 /// Explode / Swirl: shatter the outgoing card into a grid of coloured tiles that
@@ -630,26 +971,33 @@ fn draw_division_house(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::
     let divisor = p.b.to_string();
     let quotient = if input.is_empty() { "?".to_string() } else { input.to_string() };
     let scale = fit_scale(&format!("{}  {}", divisor, dividend), cw - 200.0, 6.0);
-    let gh = glyph_h(scale);
-    let pad = scale * 8.0;
+
+    // Glyph-relative spacing so the roof/wall keep a clear margin from the digits
+    // (matching the stacked layout) rather than sitting on top of them.
+    let px = scale * PX_PER_SCALE;
+    let gbot = px * 0.80; // a glyph's visual bottom, below its line top
+    let gtop = px * 0.08; // a glyph's visual top, below its line top
+    let margin = px * 0.24; // clear gap around the house lines
+    let hgap = scale * 12.0; // horizontal gap divisor | wall | dividend
 
     let (wd, wq, wv) = (text_width(&dividend, scale), text_width(&quotient, scale), text_width(&divisor, scale));
-    let total_w = wv + pad + wd;
+    let total_w = wv + hgap + hgap + wd;
     let x0 = cxc - total_w / 2.0;
-    let wall_x = x0 + wv + pad * 0.5;
-    let dividend_x = wall_x + pad * 0.5;
+    let wall_x = x0 + wv + hgap;
+    let dividend_x = wall_x + hgap;
     let quotient_x = dividend_x + (wd - wq);
 
-    let total_h = 2.0 * gh + gh * 0.3;
+    let total_h = 2.0 * gbot + 2.5 * margin - gtop;
     let q_y = cyc - total_h / 2.0;
-    let roof_y = q_y + gh + gh * 0.1;
-    let dvd_y = roof_y + gh * 0.2;
+    let roof_y = q_y + gbot + margin; // a margin below the quotient
+    let dvd_y = roof_y + margin - gtop; // a margin above the dividend digits
+    let wall_bottom = dvd_y + gbot + margin * 0.4;
 
     text(pm, quotient_x, q_y, scale, &quotient, acol); // quotient above the roof
     text(pm, x0, dvd_y, scale, &divisor, accent); // divisor left of the wall
     text(pm, dividend_x, dvd_y, scale, &dividend, accent); // dividend inside
     // The house: a left wall and a roof over the dividend.
-    line(pm, wall_x, roof_y, wall_x, dvd_y + gh, accent, 3.0);
+    line(pm, wall_x, roof_y, wall_x, wall_bottom, accent, 3.0);
     line(pm, wall_x, roof_y, dividend_x + wd, roof_y, accent, 3.0);
 }
 
@@ -669,12 +1017,14 @@ fn draw_settings(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
 
     let g = app.settings_grade;
     let r = app.config.range(g);
-    let rows: [(&str, String); 5] = [
+    let rows: [(&str, String); 7] = [
         ("Grade", format!("< {} >", grade_name(g))),
         ("Add / Subtract up to", format!("< {} >", r.add_max)),
         ("Multiply factors up to", format!("< {} >", r.mul_max)),
         ("Divide numbers up to", format!("< {} >", r.div_max)),
         ("Allow negative answers", format!("< {} >", if r.allow_negative { "Yes" } else { "No" })),
+        ("Show problems", format!("< {} >", app.config.layout.name())),
+        ("Theme", format!("< {} >", app.config.theme.name())),
     ];
 
     let block_w = 560.0;
@@ -1183,7 +1533,16 @@ fn draw_help(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32, f32
                 draw_strategy_text(pm, region, s, app.revealed, app.anim_frame);
             }
         }
-        Active::Shape(s) => hint_body(pm, inner_x, y, body_w, body_bottom, &s.hint, &s.answer_label(), app.revealed, app.anim_frame),
+        Active::Shape(s) => {
+            // Chalk: the hint talks about a colour ("...pieces are green") — swap
+            // that for "shaded" so it matches the monochrome figure and question.
+            let hint: Vec<String> = if is_chalk() {
+                s.hint.iter().map(|h| h.replace(s.color_name, "shaded")).collect()
+            } else {
+                s.hint.clone()
+            };
+            hint_body(pm, inner_x, y, body_w, body_bottom, &hint, &s.answer_label(), app.revealed, app.anim_frame);
+        }
         Active::Unit(u) => hint_body(pm, inner_x, y, body_w, body_bottom, &u.hint, &format!("Answer: {} {}", u.answer, u.unit_label), app.revealed, app.anim_frame),
         Active::Geo(g) => hint_body(pm, inner_x, y, body_w, body_bottom, &g.hint, &g.answer_label(), app.revealed, app.anim_frame),
     }
@@ -1626,9 +1985,21 @@ fn question_of(active: &Active) -> String {
     match active {
         Active::Arith(p) => p.prompt(),
         Active::Unit(u) => u.question.clone(),
+        // Chalk is monochrome, so the colour ("...is purple?") is meaningless —
+        // ask about the *shaded* (filled) share instead, to match the figure.
+        Active::Shape(s) if is_chalk() => shaded_question(s),
         Active::Shape(s) => s.question(),
         Active::Geo(g) => g.question(),
     }
+}
+
+/// The colour-free, chalk-mode framing of a fraction/percent question.
+fn shaded_question(s: &FractionProblem) -> String {
+    let kind = match s.mode {
+        Mode::Fraction => "fraction",
+        Mode::Percent => "percent",
+    };
+    format!("What {} of the {} is shaded?", kind, s.shape_word())
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,13 +2051,34 @@ fn text(pm: &mut Pixmap, x: f32, y: f32, scale: f32, s: &str, color: Rgb) {
 fn draw_ttf(pm: &mut Pixmap, font: &FontVec, x: f32, y: f32, px: f32, s: &str, color: Rgb) {
     let scaled = font.as_scaled(px);
     let baseline = y + scaled.ascent();
+    let chalk = chalk();
+    // Chalk weight scales with the glyph size so small text (menu, footers) stays
+    // crisp while big formulas read as chunky chalk.  Wobble only the large text —
+    // jittering small UI text just makes it look fuzzy.
+    let bold = px * 0.03;
+    let wob = if chalk && px > 90.0 { px * 0.05 } else { 0.0 };
     let mut caret = x;
-    for ch in s.chars() {
+    for (gi, ch) in s.chars().enumerate() {
         let gid = font.glyph_id(ch);
-        let glyph = gid.with_scale_and_position(px, ab_glyph::point(caret, baseline));
+        let (jx, jy) = if wob > 0.0 {
+            let h = gi as u32 + ch as u32;
+            ((hash01(h, 11) - 0.5) * wob, (hash01(h, 71) - 0.5) * wob * 1.4)
+        } else {
+            (0.0, 0.0)
+        };
+        let glyph = gid.with_scale_and_position(px, ab_glyph::point(caret + jx, baseline + jy));
         if let Some(outline) = font.outline_glyph(glyph) {
             let bb = outline.px_bounds();
-            outline.draw(|gx, gy, cov| blend(pm, bb.min.x + gx as f32, bb.min.y + gy as f32, color, cov));
+            outline.draw(|gx, gy, cov| {
+                let (gx, gy) = (bb.min.x + gx as f32, bb.min.y + gy as f32);
+                blend(pm, gx, gy, color, cov);
+                if chalk {
+                    // Dilate by a size-proportional amount for a chalk stroke.
+                    for (ox, oy) in [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)] {
+                        blend(pm, gx + ox * bold, gy + oy * bold, color, cov * 0.7);
+                    }
+                }
+            });
         }
         caret += scaled.h_advance(gid);
     }
@@ -1743,6 +2135,7 @@ fn blend(pm: &mut Pixmap, x: f32, y: f32, color: Rgb, a: f32) {
     if a <= 0.0 || x < 0.0 || y < 0.0 {
         return;
     }
+    let color = themed(color);
     let (w, h) = (pm.width(), pm.height());
     let (xi, yi) = (x as u32, y as u32);
     if xi >= w || yi >= h {
@@ -1795,6 +2188,11 @@ const SEP: Rgb = [92, 96, 116];
 /// Draw the fraction/percent figure inside `(rx, ry, rw, rh)`, the shaded pieces
 /// first, materialising as `progress` rises from 0 to 1.
 fn draw_shape(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: &FractionProblem, progress: f32) {
+    // Chalk is monochrome: shade by *filling* (vs hollow outline), not colour.
+    if is_chalk() {
+        draw_shape_chalk(pm, rx, ry, rw, rh, s, progress);
+        return;
+    }
     let color_of = |i: u16| core_col(s.color_of(i));
     match s.shape {
         Shape::Bar { segments } => draw_cells(pm, rx, ry, rw, rh, 1, segments, progress, &color_of),
@@ -1802,6 +2200,101 @@ fn draw_shape(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: &Fract
         Shape::Circle { slices } => draw_pie(pm, rx, ry, rw, rh, slices, progress, &color_of),
         Shape::Triangle { strips } => draw_tri_strips(pm, rx, ry, rw, rh, strips, progress, &color_of),
     };
+}
+
+/// Has region `i` of `n` appeared yet at this `progress`?
+fn appeared(i: u16, n: u16, progress: f32) -> bool {
+    progress + 0.001 >= (i as f32 + 1.0) / n as f32
+}
+
+/// Chalk figure: every piece is outlined in chalk; the *shaded* pieces are filled
+/// in solid (so the share reads in black-and-white without any colour).
+fn draw_shape_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, s: &FractionProblem, progress: f32) {
+    let shaded = s.shaded as u16;
+    let fill_in = |i: u16, n: u16| i < shaded && appeared(i, n, progress);
+    match s.shape {
+        Shape::Bar { segments } => draw_cells_chalk(pm, rx, ry, rw, rh, 1, segments, &fill_in),
+        Shape::Grid { rows, cols } => draw_cells_chalk(pm, rx, ry, rw, rh, rows, cols, &fill_in),
+        Shape::Circle { slices } => draw_pie_chalk(pm, rx, ry, rw, rh, slices, &fill_in),
+        Shape::Triangle { strips } => draw_tri_chalk(pm, rx, ry, rw, rh, strips, &fill_in),
+    }
+}
+
+/// Cells (bar / grid): every cell outlined, shaded cells filled solid.
+fn draw_cells_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, rows: u16, cols: u16, fill_in: &impl Fn(u16, u16) -> bool) {
+    let n = rows * cols;
+    let gap = 7.0;
+    let cw = ((rw - (cols - 1) as f32 * gap) / cols as f32).min(70.0);
+    let cht = ((rh - (rows - 1) as f32 * gap) / rows as f32).min(if rows == 1 { 96.0 } else { 64.0 });
+    let total_w = cols as f32 * cw + (cols - 1) as f32 * gap;
+    let total_h = rows as f32 * cht + (rows - 1) as f32 * gap;
+    let x0 = rx + (rw - total_w) / 2.0;
+    let y0 = ry + (rh - total_h) / 2.0;
+    for i in 0..n {
+        let (row, c) = (i / cols, i % cols);
+        let x = x0 + c as f32 * (cw + gap);
+        let y = y0 + row as f32 * (cht + gap);
+        if fill_in(i, n) {
+            fill(pm, x, y, cw, cht, WHITE);
+        }
+        stroke_rect(pm, x, y, cw, cht, 2.0, WHITE);
+    }
+}
+
+/// Pie: every wedge outlined by spokes + rim, shaded wedges filled solid.
+fn draw_pie_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, slices: u16, fill_in: &impl Fn(u16, u16) -> bool) {
+    use std::f32::consts::TAU;
+    let (cx, cy) = (rx + rw / 2.0, ry + rh / 2.0);
+    let radius = (rw / 2.0).min(rh / 2.0) * 0.92;
+    let ang = |k: u16| (k as f32 / slices as f32 - 0.5) * TAU;
+    for k in 0..slices {
+        if !fill_in(k, slices) {
+            continue;
+        }
+        let (t0, t1) = (ang(k), ang(k + 1));
+        let mut pts = vec![(cx, cy)];
+        for sgmt in 0..=10 {
+            let a = t0 + (t1 - t0) * (sgmt as f32 / 10.0);
+            pts.push((cx + a.cos() * radius, cy + a.sin() * radius));
+        }
+        if let Some(p) = poly(&pts) {
+            fill_path(pm, &p, WHITE);
+        }
+    }
+    for k in 0..slices {
+        let a = ang(k);
+        line(pm, cx, cy, cx + a.cos() * radius, cy + a.sin() * radius, WHITE, 2.0);
+    }
+    circle(pm, cx, cy, radius, WHITE, 2.0);
+}
+
+/// Triangle: every strip outlined, shaded strips filled solid.
+fn draw_tri_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, strips: u16, fill_in: &impl Fn(u16, u16) -> bool) {
+    let th = rh * 0.9;
+    let base_w = (rw * 0.82).min(th * 1.5);
+    let cx = rx + rw / 2.0;
+    let apex_y = ry + (rh - th) / 2.0;
+    let half = |fy: f32| fy * base_w / 2.0;
+    let yat = |fy: f32| apex_y + fy * th;
+    for i in 0..strips {
+        if !fill_in(i, strips) {
+            continue;
+        }
+        let (f0, f1) = (i as f32 / strips as f32, (i + 1) as f32 / strips as f32);
+        let (y0, y1) = (yat(f0), yat(f1));
+        let (h0, h1) = (half(f0), half(f1));
+        if let Some(p) = poly(&[(cx - h0, y0), (cx + h0, y0), (cx + h1, y1), (cx - h1, y1)]) {
+            fill_path(pm, &p, WHITE);
+        }
+    }
+    for i in 1..strips {
+        let fy = i as f32 / strips as f32;
+        line(pm, cx - half(fy), yat(fy), cx + half(fy), yat(fy), WHITE, 2.0);
+    }
+    let (bl, br, top) = ((cx - half(1.0), yat(1.0)), (cx + half(1.0), yat(1.0)), (cx, apex_y));
+    line(pm, top.0, top.1, bl.0, bl.1, WHITE, 2.0);
+    line(pm, top.0, top.1, br.0, br.1, WHITE, 2.0);
+    line(pm, bl.0, bl.1, br.0, br.1, WHITE, 2.0);
 }
 
 /// A `rows × cols` block of separated cells (covers both the bar and the grid).
@@ -2150,8 +2643,22 @@ fn stroke(pm: &mut Pixmap, path: &tiny_skia::Path, color: Rgb, width: f32) {
     // and box-averaging back down (see mod.rs) — AA without the buggy path.
     paint.anti_alias = false;
     let mut s = Stroke::default();
-    s.width = width * SSF;
+    s.width = width * SSF * chalk_mul();
     pm.stroke_path(path, &paint, &s, Transform::identity(), None);
+}
+
+/// Stroke / chalk thickening factor for the active theme (chalk is fatter).
+fn chalk_mul() -> f32 {
+    if is_chalk() {
+        2.4
+    } else {
+        1.0
+    }
+}
+
+/// Whether a chalk theme is active — for the bold/wobble paths.
+fn chalk() -> bool {
+    is_chalk()
 }
 
 fn line(pm: &mut Pixmap, x0: f32, y0: f32, x1: f32, y1: f32, color: Rgb, width: f32) {
@@ -2159,9 +2666,24 @@ fn line(pm: &mut Pixmap, x0: f32, y0: f32, x1: f32, y1: f32, color: Rgb, width: 
     if (x0 - x1).abs() < 0.5 && (y0 - y1).abs() < 0.5 {
         return;
     }
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
     let mut pb = PathBuilder::new();
     pb.move_to(x0 * SSF, y0 * SSF);
-    pb.line_to(x1 * SSF, y1 * SSF);
+    if chalk() {
+        // Hand-drawn wobble: break the line into segments whose interior joints
+        // wander a little perpendicular to it (endpoints stay put).
+        let (px, py) = (-dy / len, dx / len); // perpendicular unit
+        let segs = (len / 36.0).clamp(2.0, 8.0) as u32;
+        for k in 1..=segs {
+            let t = k as f32 / segs as f32;
+            let (bx, by) = (x0 + dx * t, y0 + dy * t);
+            let amp = if k == segs { 0.0 } else { (hash01((bx * 5.0) as u32, (by * 5.0) as u32) - 0.5) * 5.0 };
+            pb.line_to((bx + px * amp) * SSF, (by + py * amp) * SSF);
+        }
+    } else {
+        pb.line_to(x1 * SSF, y1 * SSF);
+    }
     if let Some(path) = pb.finish() {
         stroke(pm, &path, color, width);
     }
