@@ -201,9 +201,18 @@ fn draw_pie_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, slices: u
             fill_path(pm, &p, WHITE);
         }
     }
+    // Spokes: spoke k separates slice k-1 (prev) from slice k (this).
+    //   Both sides shaded  → BG void so the board shows through adjacent fills.
+    //   Either side unshaded → WHITE chalk so the boundary is visible on the board.
     for k in 0..slices {
         let a = ang(k);
-        line(pm, cx, cy, cx + a.cos() * radius, cy + a.sin() * radius, WHITE, 2.0);
+        let this_filled = fill_in(k, slices);
+        let prev_filled = fill_in((k + slices - 1) % slices, slices);
+        if this_filled && prev_filled {
+            line(pm, cx, cy, cx + a.cos() * radius, cy + a.sin() * radius, BG, 3.5);
+        } else {
+            line(pm, cx, cy, cx + a.cos() * radius, cy + a.sin() * radius, WHITE, 2.0);
+        }
     }
     circle(pm, cx, cy, radius, WHITE, 2.0);
 }
@@ -227,9 +236,16 @@ fn draw_tri_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, strips: u
             fill_path(pm, &p, WHITE);
         }
     }
+    // Separator at strip boundary i separates strip i-1 (above) from strip i (below).
+    //   Both filled   → BG void so the board shows through adjacent chalk fills.
+    //   Either empty  → WHITE chalk so the boundary is visible on the board.
+    // Outer edges (sloped sides + base) are always WHITE chalk on board.
     for i in 1..strips {
         let fy = i as f32 / strips as f32;
-        line(pm, cx - half(fy), yat(fy), cx + half(fy), yat(fy), WHITE, 2.0);
+        let above_filled = fill_in(i - 1, strips);
+        let below_filled = fill_in(i, strips);
+        let (color, width) = if above_filled && below_filled { (BG, 3.5) } else { (WHITE, 2.0) };
+        line(pm, cx - half(fy), yat(fy), cx + half(fy), yat(fy), color, width);
     }
     let (bl, br, top) = ((cx - half(1.0), yat(1.0)), (cx + half(1.0), yat(1.0)), (cx, apex_y));
     line(pm, top.0, top.1, bl.0, bl.1, WHITE, 2.0);

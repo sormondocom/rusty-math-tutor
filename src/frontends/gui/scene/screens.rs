@@ -30,8 +30,14 @@ pub fn draw_startup(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
 }
 
 pub fn draw_menu(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    // Name-entry modal takes over the whole screen so the user can clearly see
+    // they are in a text-input state and arrows / other keys don't get eaten.
+    if app.naming {
+        draw_name_prompt(pm, app, wf, hf);
+        return;
+    }
+
     text_centered(pm, wf / 2.0, 26.0, 5.0, "RUSTY MATH TUTOR", WHITE);
-    text_centered(pm, wf / 2.0, 84.0, 1.75, "Featuring:  Deduction Duck", YELLOW);
 
     let rows = menu_rows(app);
     let scale = 1.75;
@@ -39,34 +45,98 @@ pub fn draw_menu(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let top = 130.0;
     let box_s = scale * 9.0;
     let label_dx = box_s + scale * 7.0; // toggle rows indent past their checkbox
-    // Center the whole block on the widest row; the highlight bar matches that
-    // width so the selection never clips, and the drawn checkbox keeps every row
-    // a fixed width (no reflow when a section is toggled on/off).
     let row_w = |r: &MenuRow| match r {
         MenuRow::Check(_, l) => label_dx + text_width(l, scale),
         MenuRow::Text(t) => text_width(t, scale),
     };
-    let content_w = rows.iter().map(row_w).fold(0.0_f32, f32::max);
+    // Skip the student row (index 0) when computing the layout width so the
+    // rest of the menu never shifts when cycling between students with
+    // different name lengths.  The student row is centred independently.
+    let content_w = rows.iter().skip(1).map(row_w).fold(0.0_f32, f32::max);
     let x = (wf - content_w) / 2.0;
     let pad = 14.0;
     for (i, row) in rows.iter().enumerate() {
         let y = top + i as f32 * row_h;
-        if i == app.menu_index {
-            fill(pm, x - pad, y - 5.0, content_w + pad * 2.0, row_h - 2.0, SEL_BG);
-        }
-        let color = if i == app.menu_index { WHITE } else { GRAY };
-        match row {
-            MenuRow::Check(on, label) => {
-                stroke_rect(pm, x, y, box_s, box_s, 2.0, color);
-                if *on {
-                    fill(pm, x + 3.0, y + 3.0, box_s - 6.0, box_s - 6.0, ACCENT);
+        let selected = i == app.menu_index;
+        let color = if selected { WHITE } else { GRAY };
+
+        if i == 0 {
+            // Student row: centred independently of x/content_w.  The highlight
+            // bar is sized and positioned relative to the actual rendered text
+            // so it tracks the name regardless of length.
+            if let MenuRow::Text(t) = row {
+                let tw = text_width(t, scale);
+                let hx = wf / 2.0 - tw / 2.0 - pad;
+                if selected {
+                    fill(pm, hx, y - 5.0, tw + pad * 2.0, row_h - 2.0, SEL_BG);
                 }
-                text(pm, x + label_dx, y, scale, label, color);
+                text_centered(pm, wf / 2.0, y, scale, t, color);
             }
-            MenuRow::Text(t) => text(pm, x, y, scale, t, color),
+        } else {
+            if selected {
+                fill(pm, x - pad, y - 5.0, content_w + pad * 2.0, row_h - 2.0, SEL_BG);
+            }
+            match row {
+                MenuRow::Check(on, label) => {
+                    stroke_rect(pm, x, y, box_s, box_s, 2.0, color);
+                    if *on {
+                        fill(pm, x + 3.0, y + 3.0, box_s - 6.0, box_s - 6.0, ACCENT);
+                    }
+                    text(pm, x + label_dx, y, scale, label, color);
+                }
+                MenuRow::Text(t) => text(pm, x, y, scale, t, color),
+            }
         }
     }
-    text_centered(pm, wf / 2.0, hf - 36.0, 1.5, "Up / Down move    Enter select    Q quit", GRAY);
+    text_centered(pm, wf / 2.0, hf - 54.0, 1.5, "Up / Down: move    Enter: select    Q: quit", GRAY);
+    text_centered(pm, wf / 2.0, hf - 26.0, 1.5, "N: add new student    Left / Right: switch student", GRAY);
+
+    // Left panel: "Featuring: Deduction Duck" label + duck, both centred on
+    // the same column centre so they stay aligned at any window size.
+    let left_w = x - 20.0;
+    if left_w > 60.0 {
+        // Centre of the left column — used for both label and duck so they
+        // are always horizontally aligned with each other.
+        let col_cx = 10.0 + left_w / 2.0;
+
+        // Align with the menu rows exactly — same top, same bottom.
+        let menu_top = top;
+        let menu_bot = top + rows.len() as f32 * row_h;
+
+        // Asset is portrait 850 × 1150.  Constrain duck height so the
+        // display width never exceeds the column width.
+        const W_OVER_H: f32 = 850.0 / 1150.0;
+        let max_h_for_col = left_w / W_OVER_H;
+        let duck_h = (menu_bot - menu_top).min(max_h_for_col).min(hf * 0.45).max(40.0);
+
+        // Vertically centre the duck within the menu band.
+        let group_top = menu_top + (menu_bot - menu_top - duck_h) / 2.0;
+
+        // Label sits in the upper half of the label slot (vertically centred
+        // within it) so there is visible space both above and below the text.
+        let duck_y = group_top;
+        draw_duck_png(pm, col_cx, duck_y, duck_h);
+    }
+}
+
+fn draw_name_prompt(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    let cxc = wf / 2.0;
+    let cy = hf / 2.0;
+
+    text_centered(pm, cxc, cy - 110.0, 2.5, "Add a New Student", WHITE);
+    text_centered(pm, cxc, cy - 68.0,  1.5, "Type the name, then press Enter to save.", GRAY);
+
+    // Input box — SEL_BG background so it stands out clearly from the dark BG.
+    let (bw, bh) = (580.0, 72.0);
+    let bx = (wf - bw) / 2.0;
+    let by = cy - 36.0;
+    fill(pm, bx, by, bw, bh, SEL_BG);
+    stroke_rect(pm, bx, by, bw, bh, 4.0, ACCENT);
+
+    let shown = format!("{}_", app.name_input);
+    text_centered(pm, cxc, by + 16.0, 2.5, &shown, WHITE);
+
+    text_centered(pm, cxc, cy + 58.0, 1.5, "Enter: save    Esc: cancel", GRAY);
 }
 
 /// A menu row: a toggle with a drawn checkbox, or a plain text/setting row.

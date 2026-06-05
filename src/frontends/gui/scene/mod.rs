@@ -13,6 +13,7 @@ mod help;
 mod paint;
 mod render;
 mod screens;
+mod sprites;
 mod text;
 mod transition;
 
@@ -30,5 +31,6 @@ pub use figures::*;
 pub use help::*;
 pub use paint::*;
 pub use screens::*;
+pub use sprites::*;
 pub use text::*;
 pub use transition::*;
