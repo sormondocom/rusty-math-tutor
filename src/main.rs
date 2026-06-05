@@ -57,7 +57,7 @@ mod font;
 mod shapes;
 #[path = "frontends/terminal/transition.rs"]
 mod transition;
-#[path = "frontends/terminal/ui.rs"]
+#[path = "frontends/terminal/ui/mod.rs"]
 mod ui;
 
 // --- CPU graphics frontend (feature = "gui"): winit + softbuffer + tiny-skia ---
