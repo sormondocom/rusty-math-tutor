@@ -20,14 +20,14 @@ use super::*;
 /// The duck's stage: a panel sliding up from the bottom in which he acts out
 /// the chosen strategy — walking a number line, smashing a number, or talking
 /// it through.  Hint steps show first; the answer appears only once revealed.
-pub(super) fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect, problem: &Problem) {
+pub fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect, problem: &Problem) {
     let strats = strategy::strategies(problem);
     let idx = app.strategy_index % strats.len();
     let s = &strats[idx];
 
     // Panel geometry; slides up from below as `help_in` eases 0..1.
-    let panel_w = area.width.saturating_sub(4).min(72).max(20).min(area.width);
-    let panel_h = area.height.saturating_sub(2).min(18).max(9).min(area.height);
+    let panel_w = area.width.saturating_sub(4).clamp(20, 72).min(area.width);
+    let panel_h = area.height.saturating_sub(2).clamp(9, 18).min(area.height);
     let rest_y = area.top() + area.height.saturating_sub(panel_h) / 2;
     let slide = ((1.0 - app.help_in.clamp(0.0, 1.0)) * (panel_h as f32 + 2.0)) as u16;
     let panel_x = area.left() + area.width.saturating_sub(panel_w) / 2;
@@ -175,13 +175,11 @@ fn draw_number_line(buf: &mut Buffer, content: Rect, s: &Strategy, stops: &[i64]
     for x in ax0..=ax1.min(content.right().saturating_sub(1)) {
         buf[(x, axis_y)].set_symbol("─").set_fg(Color::DarkGray);
     }
-    for i in 0..n {
+    for (i, lbl) in labels.iter().enumerate().take(n) {
         let x = x_at(i).min(content.right().saturating_sub(1));
         buf[(x, axis_y)].set_symbol("┼").set_fg(accent);
-        let lbl = &labels[i];
         let lx = x.saturating_sub(lbl.len() as u16 / 2);
-        let last = i == n - 1;
-        let lstyle = if app.revealed && last {
+        let lstyle = if app.revealed && i == n - 1 {
             Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
@@ -189,9 +187,8 @@ fn draw_number_line(buf: &mut Buffer, content: Rect, s: &Strategy, stops: &[i64]
         put_str(buf, lx, label_y, lbl, lstyle);
     }
     // Hop labels above each segment.
-    for i in 0..n - 1 {
+    for (i, h) in hops.iter().enumerate().take(n - 1) {
         let xm = (x_at(i) + x_at(i + 1)) / 2;
-        let h = &hops[i];
         put_str(buf, xm.saturating_sub(h.len() as u16 / 2), hop_y, h, Style::default().fg(Color::LightGreen));
     }
 

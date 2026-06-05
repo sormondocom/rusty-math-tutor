@@ -167,9 +167,7 @@ fn friendly_steps(first_partial: i64, amount: i64) -> Option<Vec<i64>> {
         jumps.push(first_partial);
         rem -= first_partial;
     }
-    for _ in 0..(rem / 10) {
-        jumps.push(10);
-    }
+    jumps.extend(std::iter::repeat_n(10, (rem / 10) as usize));
     if rem % 10 > 0 {
         jumps.push(rem % 10);
     }

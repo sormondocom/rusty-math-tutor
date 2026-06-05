@@ -214,14 +214,14 @@ fn render_rocket_name(area: Rect, buf: &mut Buffer, name: &str, sub: &str, accen
                     put_str(buf, tx, ey, g.to_string(), Style::default().fg(*col));
                 }
             }
-            put_str(buf, tx, cur_y, "▲".to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+            put_str(buf, tx, cur_y, "▲", Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
         } else {
             // Letter formed: a bright star that flares white as it ignites.
             let fresh = frame < lit_at(i as u64) + 6;
             let style = Style::default().fg(if fresh { Color::White } else { accent }).add_modifier(Modifier::BOLD);
             put_str(buf, tx, ny, ch.to_string(), style);
             if fresh && ny > area.top() {
-                put_str(buf, tx, ny - 1, "✦".to_string(), Style::default().fg(Color::LightYellow));
+                put_str(buf, tx, ny - 1, "✦", Style::default().fg(Color::LightYellow));
             }
         }
     }
@@ -235,7 +235,7 @@ fn render_rocket_name(area: Rect, buf: &mut Buffer, name: &str, sub: &str, accen
     draw_awe_duck(buf, area, frame);
 }
 
-pub(super) fn draw_cinematic(f: &mut Frame, app: &App, fx: &Transitions, area: Rect) {
+pub fn draw_cinematic(f: &mut Frame, app: &App, fx: &Transitions, area: Rect) {
     let buf = f.buffer_mut();
     if let Some(t) = &fx.scene {
         // A scene-to-scene transition is playing (owned by the frontend).

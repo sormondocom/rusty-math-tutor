@@ -17,7 +17,7 @@ use super::*;
 
 // -- Startup — graphics mode picker -----------------------------------------
 
-pub(super) fn draw_startup(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_startup(f: &mut Frame, app: &App, area: Rect) {
     use crate::config::GraphicsMode;
     let buf = f.buffer_mut();
 
@@ -51,7 +51,7 @@ pub(super) fn draw_startup(f: &mut Frame, app: &App, area: Rect) {
 
 // -- Menu -------------------------------------------------------------------
 
-pub(super) fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
 
     let title = "1 + 1 = ?";
@@ -130,7 +130,7 @@ fn draw_menu_duck(buf: &mut Buffer, area: Rect, frame: u64) {
                 let t = phase as f32 / DUR as f32;
                 let span = (area.width as i32 + 2 * duck::WIDTH as i32 + 4) as f32;
                 let x = (area.left() as i32 - duck::WIDTH as i32 - 2) as f32 + t * span;
-                let y = area.bottom() as i32 - hgt - if (frame / 6) % 2 == 0 { 0 } else { 1 };
+                let y = area.bottom() as i32 - hgt - if (frame / 6).is_multiple_of(2) { 0 } else { 1 };
                 duck::draw_pose_i32(buf, x.round() as i32, y, Pose::WalkRight, frame / 5, style);
             }
         }
@@ -216,7 +216,7 @@ fn grade_name(grade: u8) -> String {
 
 // -- My Progress — encouragement only, never comparison ---------------------
 
-pub(super) fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
     let s = app.roster.current();
     let total = s.grand_total();
@@ -270,7 +270,7 @@ fn encouragement(total: u32) -> &'static str {
 
 // -- Teacher Area — password-gated anecdote editor + records admin ----------
 
-pub(super) fn draw_teacher(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_teacher(f: &mut Frame, app: &App, area: Rect) {
     if !app.teacher_authed {
         draw_teacher_login(f, app, area);
     } else {
@@ -340,8 +340,8 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
 
     // When adding, a wrapping input box claims the lower part of the screen.
     let input_box = if app.teacher_adding {
-        let box_h = 8u16.min(area.height.saturating_sub(9)).max(4);
-        let box_w = area.right().saturating_sub(col).saturating_sub(2).min(66).max(20);
+        let box_h = area.height.saturating_sub(9).clamp(4, 8);
+        let box_w = area.right().saturating_sub(col).saturating_sub(2).clamp(20, 66);
         let box_y = area.bottom().saturating_sub(box_h + 2);
         Some(Rect { x: col, y: box_y, width: box_w, height: box_h })
     } else {
@@ -458,7 +458,7 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
 
 // -- Settings — per-grade number ranges -------------------------------------
 
-pub(super) fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
     let col = area.left() + (area.width.saturating_sub(46)) / 2;
 

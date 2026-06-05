@@ -10,7 +10,7 @@ use crate::section::Active;
 
 use super::*;
 
-pub(super) fn draw_help(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32, f32)) {
+pub fn draw_help(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32, f32)) {
     let pw = (cw * 0.88).min(860.0);
     let ph = (ch * 0.78).min(470.0);
     let px = cx0 + (cw - pw) / 2.0;
@@ -170,14 +170,14 @@ fn draw_number_line(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: 
 
     // Axis, ticks, labels.
     line(pm, ax0, axis_y, ax1, axis_y, [78, 82, 100], 2.0);
-    for i in 0..n {
+    for (i, lbl) in labels.iter().enumerate().take(n) {
         let x = x_at(i);
         line(pm, x, axis_y - 7.0, x, axis_y + 7.0, accent, 2.0);
         let green = app.revealed && i == n - 1;
-        text_centered(pm, x, label_y, lscale, &labels[i], if green { ACCENT } else { GRAY });
+        text_centered(pm, x, label_y, lscale, lbl, if green { ACCENT } else { GRAY });
     }
-    for i in 0..n - 1 {
-        text_centered(pm, (x_at(i) + x_at(i + 1)) / 2.0, hop_y, 1.2, &hops[i], ACCENT);
+    for (i, h) in hops.iter().enumerate().take(n - 1) {
+        text_centered(pm, (x_at(i) + x_at(i + 1)) / 2.0, hop_y, 1.2, h, ACCENT);
     }
 
     // Walking duck: travel each segment, dwelling on the final stop, then loop.
@@ -241,7 +241,7 @@ fn draw_smash(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: &crate
 
 /// "Why am I learning this?" — real-life uses for the section, plus an occasional
 /// peek at a line of this app's own code.  Scrolls with Up/Down when it overflows.
-pub(super) fn draw_why(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32, f32)) {
+pub fn draw_why(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32, f32)) {
     let heading = crate::motivation::heading(app.current_topic());
     let pw = (cw * 0.9).min(900.0);
     let ph = (ch * 0.86).min(560.0);

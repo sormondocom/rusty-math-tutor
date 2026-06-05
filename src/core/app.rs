@@ -833,7 +833,7 @@ impl App {
             } else if self.help_active {
                 self.help_active = false;
             } else {
-                self.to_menu();
+                self.enter_menu();
             }
             return;
         }
@@ -893,7 +893,7 @@ impl App {
         }
 
         // Finished challenge: Enter starts a fresh run.
-        if self.challenge.as_ref().map_or(false, |c| c.finished) {
+        if self.challenge.as_ref().is_some_and(|c| c.finished) {
             if key == Key::Enter {
                 self.start_session(true);
             }
@@ -1015,7 +1015,7 @@ impl App {
         self.card_anim = 0; // the very first problem draws itself on
     }
 
-    fn to_menu(&mut self) {
+    fn enter_menu(&mut self) {
         self.screen = Screen::Menu;
         self.transition = None;
         self.pending = None;
@@ -1151,7 +1151,7 @@ impl App {
 
     fn on_experiment_key(&mut self, key: Key) {
         match key {
-            Key::Esc => self.to_menu(),
+            Key::Esc => self.enter_menu(),
             Key::Up => self.exp_field = (self.exp_field + EXP_FIELDS - 1) % EXP_FIELDS,
             Key::Down => self.exp_field = (self.exp_field + 1) % EXP_FIELDS,
             Key::Left | Key::Right => {

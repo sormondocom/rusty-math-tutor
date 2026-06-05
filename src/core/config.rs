@@ -21,18 +21,13 @@ use crate::storage::Storage;
 ///
 /// [`Low`]: GraphicsMode::Low
 /// [`Cpu`]: GraphicsMode::Cpu
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GraphicsMode {
     /// Low-graphics console renderer (the current, fully-supported mode).
+    #[default]
     Low,
     /// CPU-driven graphical renderer (shelved — "coming soon").
     Cpu,
-}
-
-impl Default for GraphicsMode {
-    fn default() -> Self {
-        GraphicsMode::Low
-    }
 }
 
 impl GraphicsMode {
@@ -56,20 +51,15 @@ impl GraphicsMode {
 
 /// Visual theme for the CPU-graphics window (its palette / "look").  The console
 /// renderer has its own fixed styling and ignores this.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
     /// The standard dark-slate palette.
+    #[default]
     Default,
     /// White chalk on a black board.
     Blackboard,
     /// White chalk on a dark-green board.
     Chalkboard,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::Default
-    }
 }
 
 impl Theme {

@@ -15,7 +15,7 @@ use super::*;
 
 // -- Arithmetic — the three layouts -----------------------------------------
 
-pub(super) fn draw_arith(pm: &mut Pixmap, (cx0, cy0, cw, ch): (f32, f32, f32, f32), p: &crate::problem::Problem, input: &str, layout: crate::config::Layout, feedback: Feedback) {
+pub fn draw_arith(pm: &mut Pixmap, (cx0, cy0, cw, ch): (f32, f32, f32, f32), p: &crate::problem::Problem, input: &str, layout: crate::config::Layout, feedback: Feedback) {
     use crate::config::Layout;
     use crate::problem::Op;
     let accent = core_col(p.accent);
@@ -29,6 +29,7 @@ pub(super) fn draw_arith(pm: &mut Pixmap, (cx0, cy0, cw, ch): (f32, f32, f32, f3
 }
 
 /// `a op b = answer` on one line, the answer to the right of the `=`.
+#[allow(clippy::too_many_arguments)]
 fn draw_horizontal(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::problem::Problem, input: &str, accent: Rgb, acol: Rgb) {
     let prompt = p.prompt();
     let answer = if input.is_empty() { "?" } else { input };
@@ -42,6 +43,7 @@ fn draw_horizontal(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::prob
 }
 
 /// The stacked column form: operands right-aligned, a divider, the answer below.
+#[allow(clippy::too_many_arguments)]
 fn draw_vertical(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::problem::Problem, input: &str, accent: Rgb, acol: Rgb) {
     let (a, b) = (p.a.to_string(), p.b.to_string());
     let ans = if input.is_empty() { "?".to_string() } else { input.to_string() };
@@ -79,6 +81,7 @@ fn draw_vertical(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::proble
 }
 
 /// Long-division "house": quotient on the roof, divisor outside, dividend inside.
+#[allow(clippy::too_many_arguments)]
 fn draw_division_house(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::problem::Problem, input: &str, accent: Rgb, acol: Rgb) {
     let dividend = p.a.to_string();
     let divisor = p.b.to_string();
@@ -123,7 +126,7 @@ const SEP: Rgb = [92, 96, 116];
 
 /// Draw the fraction/percent figure inside `(rx, ry, rw, rh)`, the shaded pieces
 /// first, materialising as `progress` rises from 0 to 1.
-pub(super) fn draw_shape(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: &FractionProblem, progress: f32) {
+pub fn draw_shape(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), s: &FractionProblem, progress: f32) {
     // Chalk is monochrome: shade by *filling* (vs hollow outline), not colour.
     if is_chalk() {
         draw_shape_chalk(pm, rx, ry, rw, rh, s, progress);
@@ -157,6 +160,7 @@ fn draw_shape_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, s: &Fra
 }
 
 /// Cells (bar / grid): every cell outlined, shaded cells filled solid.
+#[allow(clippy::too_many_arguments)]
 fn draw_cells_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, rows: u16, cols: u16, fill_in: &impl Fn(u16, u16) -> bool) {
     let n = rows * cols;
     let gap = 7.0;
@@ -234,6 +238,7 @@ fn draw_tri_chalk(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, strips: u
 }
 
 /// A `rows × cols` block of separated cells (covers both the bar and the grid).
+#[allow(clippy::too_many_arguments)]
 fn draw_cells(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, rows: u16, cols: u16, progress: f32, color_of: &impl Fn(u16) -> Rgb) {
     let n = rows * cols;
     let gap = 7.0;
@@ -252,6 +257,7 @@ fn draw_cells(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, rows: u16, co
 }
 
 /// A pie circle of `slices` wedges, shaded pieces first.
+#[allow(clippy::too_many_arguments)]
 fn draw_pie(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, slices: u16, progress: f32, color_of: &impl Fn(u16) -> Rgb) {
     use std::f32::consts::TAU;
     let (cx, cy) = (rx + rw / 2.0, ry + rh / 2.0);
@@ -278,6 +284,7 @@ fn draw_pie(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, slices: u16, pr
 }
 
 /// An upward triangle cut into `strips` horizontal layers (apex = region 0).
+#[allow(clippy::too_many_arguments)]
 fn draw_tri_strips(pm: &mut Pixmap, rx: f32, ry: f32, rw: f32, rh: f32, strips: u16, progress: f32, color_of: &impl Fn(u16) -> Rgb) {
     let th = rh * 0.9;
     let base_w = (rw * 0.82).min(th * 1.5);
@@ -321,7 +328,7 @@ fn region_fill(i: u16, n: u16, progress: f32, base: Rgb) -> Rgb {
 // -- Geometry shapes --------------------------------------------------------
 
 /// Draw the section's shape inside the region `(x, y, w, h)`, labelled.
-pub(super) fn draw_geo(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), g: &GeometryProblem) {
+pub fn draw_geo(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), g: &GeometryProblem) {
     let (cx, cy) = (rx + rw / 2.0, ry + rh / 2.0);
     match g.shape {
         GeoShape::Rect { w, h } => {
@@ -373,7 +380,7 @@ pub(super) fn draw_geo(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), 
 // -- Units of Measure — a themed prop per problem ---------------------------
 
 /// The accent colour for a unit problem's theme (matches the terminal palette).
-pub(super) fn theme_col(t: Theme) -> Rgb {
+pub fn theme_col(t: Theme) -> Rgb {
     match t {
         Theme::Cup => [240, 215, 110],
         Theme::Pool => [120, 170, 240],
@@ -385,7 +392,7 @@ pub(super) fn theme_col(t: Theme) -> Rgb {
 }
 
 /// Draw a small prop for `theme`, centred in `(rx, ry, rw, rh)`.
-pub(super) fn draw_unit_prop(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), theme: Theme) {
+pub fn draw_unit_prop(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), theme: Theme) {
     let c = theme_col(theme);
     let (cx, cy) = (rx + rw / 2.0, ry + rh / 2.0);
     let h = rh * 0.74;
@@ -481,7 +488,7 @@ fn theme_splash(theme: Theme) -> &'static str {
 
 /// The silly gag: a mini duck arcs in from the left, splashes into the prop,
 /// then pops back out — on a loop, while `duck_jump` is set.
-pub(super) fn draw_unit_gag(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), theme: Theme, frame: u64) {
+pub fn draw_unit_gag(pm: &mut Pixmap, (rx, ry, rw, rh): (f32, f32, f32, f32), theme: Theme, frame: u64) {
     use std::f32::consts::PI;
     let c = theme_col(theme);
     let cx = rx + rw / 2.0;

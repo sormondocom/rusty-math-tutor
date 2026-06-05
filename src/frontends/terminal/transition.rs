@@ -623,7 +623,7 @@ fn draw_ufo(buf: &mut Buffer, area: Rect, cx: f32, cy: f32, color: Color, f: f32
     stamp(buf, area, " .-^-. ", left, cy - 1.0, color);
     stamp(buf, area, "(__o__)", left, cy, color);
     // Tractor beam pulses below the saucer.
-    if (f as u32 / 3) % 2 == 0 {
+    if (f as u32 / 3).is_multiple_of(2) {
         for k in 1..=3 {
             plot(buf, area, cx, cy + 1.0 + k as f32, ":", Color::Rgb(120, 220, 160));
         }

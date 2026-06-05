@@ -12,7 +12,7 @@ use super::*;
 
 // -- Startup + menu ---------------------------------------------------------
 
-pub(super) fn draw_startup(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_startup(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     text_centered(pm, wf / 2.0, 90.0, 6.0, "RUSTY MATH TUTOR", WHITE);
     text_centered(pm, wf / 2.0, 170.0, 2.0, "Featuring:  Deduction Duck", YELLOW);
     text_centered(pm, wf / 2.0, 240.0, 2.0, "Choose how to draw:", GRAY);
@@ -29,7 +29,7 @@ pub(super) fn draw_startup(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     text_centered(pm, wf / 2.0, hf - 50.0, 1.5, "Up / Down to choose    Enter to start", GRAY);
 }
 
-pub(super) fn draw_menu(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_menu(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     text_centered(pm, wf / 2.0, 26.0, 5.0, "RUSTY MATH TUTOR", WHITE);
     text_centered(pm, wf / 2.0, 84.0, 1.75, "Featuring:  Deduction Duck", YELLOW);
 
@@ -101,7 +101,7 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
 
 // -- Settings ---------------------------------------------------------------
 
-pub(super) fn draw_settings(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_settings(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let cxc = wf / 2.0;
     text_centered(pm, cxc, 50.0, 2.5, "SETTINGS - NUMBER RANGES", CYAN);
     text_centered(pm, cxc, 96.0, 1.5, "Tune how big the numbers get for each grade.", GRAY);
@@ -146,7 +146,7 @@ fn grade_name(grade: u8) -> String {
 
 // -- My Progress ------------------------------------------------------------
 
-pub(super) fn draw_stats(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_stats(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let s = app.roster.current();
     let total = s.grand_total();
     let cxc = wf / 2.0;
@@ -201,7 +201,7 @@ fn encouragement(total: u32) -> &'static str {
 /// Short section headers for the records table, in [`Topic::ALL`] order.
 const REC_COLS: [&str; 8] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct", "Geo"];
 
-pub(super) fn draw_teacher(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_teacher(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     if app.teacher_authed {
         draw_teacher_manage(pm, app, wf, hf);
     } else {
@@ -367,7 +367,7 @@ fn clip_chars(s: &str, n: usize) -> String {
 
 // -- Experimentation --------------------------------------------------------
 
-pub(super) fn draw_experiment(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_experiment(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     use crate::units::{self, Category};
 
     let cat = Category::ALL[app.exp_category];
@@ -436,7 +436,7 @@ enum ExpReaction {
 /// the same whichever target unit is on screen).  Mirrors the terminal frontend.
 fn exp_reaction(cat: crate::units::Category, base_value: f64) -> ExpReaction {
     let refs = crate::units::comparisons(cat);
-    if refs.is_empty() || !(base_value > 0.0) {
+    if refs.is_empty() || base_value <= 0.0 {
         return ExpReaction::None;
     }
     let best = refs.iter().min_by(|a, b| {
@@ -490,7 +490,7 @@ fn draw_exp_reaction(pm: &mut Pixmap, (cx0, cy0, cw, _ch): (f32, f32, f32, f32),
             let ang = k as f32 * TAU / 6.0;
             text_centered(pm, hx + ang.cos() * r, hy + ang.sin() * r * 0.6, 1.4, "*", RED);
         }
-    } else if (frame / 5) % 2 == 0 {
+    } else if (frame / 5).is_multiple_of(2) {
         text_centered(pm, duck_x - 10.0, duck_y + duck_h * 0.2, 1.4, "*", YELLOW);
         text_centered(pm, duck_x + duck_w + 10.0, duck_y + duck_h * 0.2, 1.4, "*", YELLOW);
     }

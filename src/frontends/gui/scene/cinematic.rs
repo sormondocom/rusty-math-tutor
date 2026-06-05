@@ -11,7 +11,7 @@ use crate::app::App;
 use super::transition::{blend_transition, card_frame};
 use super::*;
 
-pub(super) fn draw_cinematic(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_cinematic(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let Some(c) = &app.cinematic else { return };
     if let Some(t) = &c.transition {
         // A scene-to-scene transition: capture the settled current scene melting

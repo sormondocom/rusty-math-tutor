@@ -14,19 +14,14 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 /// Where the student is — picks the measurement system.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum Locality {
+    #[default]
     UnitedStates,
     UnitedKingdom,
     Metric,
     China,
     Japan,
-}
-
-impl Default for Locality {
-    fn default() -> Self {
-        Locality::UnitedStates
-    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]

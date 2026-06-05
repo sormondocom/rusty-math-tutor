@@ -20,7 +20,7 @@ use super::*;
 /// Render the answered card melting into the next one, at the core's `progress`.
 /// The two frames are captured fresh each tick (both states are static for the
 /// transition's duration), then blended per the chosen effect.
-pub(super) fn draw_transition(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+pub fn draw_transition(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let Some(phase) = &app.transition else { return };
     let (w, h) = (pm.width(), pm.height());
     let from = card_frame(w, h, |p| {
@@ -35,7 +35,7 @@ pub(super) fn draw_transition(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
 }
 
 /// Render a full-window card frame into a fresh pixmap (BG-filled) via `draw`.
-pub(super) fn card_frame(w: u32, h: u32, draw: impl FnOnce(&mut Pixmap)) -> Pixmap {
+pub fn card_frame(w: u32, h: u32, draw: impl FnOnce(&mut Pixmap)) -> Pixmap {
     let mut p = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
     p.fill(col(BG));
     draw(&mut p);
@@ -43,7 +43,7 @@ pub(super) fn card_frame(w: u32, h: u32, draw: impl FnOnce(&mut Pixmap)) -> Pixm
 }
 
 /// Blend `from`→`to` (device-resolution pixmaps) into `pm` per `effect`/`t`.
-pub(super) fn blend_transition(pm: &mut Pixmap, from: &Pixmap, to: &Pixmap, effect: crate::transition::Effect, t: f32) {
+pub fn blend_transition(pm: &mut Pixmap, from: &Pixmap, to: &Pixmap, effect: crate::transition::Effect, t: f32) {
     use crate::transition::{Effect, Kind};
 
     // Chalk themes ignore the random effect: the board is erased, then re-written.
@@ -67,9 +67,9 @@ pub(super) fn blend_transition(pm: &mut Pixmap, from: &Pixmap, to: &Pixmap, effe
             Kind::Blinds => (y / (hf / 8.0)).fract(),
             Kind::Circle => {
                 let (dx, dy) = (nx - 0.5, ny - 0.5);
-                (dx * dx + dy * dy).sqrt() / 0.7071
+                (dx * dx + dy * dy).sqrt() / std::f32::consts::FRAC_1_SQRT_2
             }
-            Kind::Slide => return nx, // handled specially below; unused here
+            Kind::Slide => nx, // handled specially below; unused here
             Kind::Diagonal => (nx + ny) / 2.0,
         }
     };
@@ -169,7 +169,7 @@ fn chalk_erase(pm: &mut Pixmap, src: &[PremultipliedColorU8], progress: f32) {
 }
 
 /// "Write" `src` on, band by band left-to-right, a chalk nib at the frontier.
-pub(super) fn write_on(pm: &mut Pixmap, src: &[PremultipliedColorU8], progress: f32) {
+pub fn write_on(pm: &mut Pixmap, src: &[PremultipliedColorU8], progress: f32) {
     let (w, h) = (pm.width(), pm.height());
     let board = prem(themed(BG));
     let bh = h as f32 / ERASE_BANDS as f32;

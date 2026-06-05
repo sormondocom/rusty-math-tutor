@@ -109,7 +109,7 @@ const AWE_B: [&str; HEIGHT as usize] = [
 ];
 
 fn sprite(pose: Pose, frame: u64) -> &'static [&'static str; HEIGHT as usize] {
-    let even = frame % 2 == 0;
+    let even = frame.is_multiple_of(2);
     match pose {
         Pose::Stand => if even { &STAND_A } else { &STAND_B },
         Pose::WalkRight => if even { &WALK_A } else { &WALK_B },
