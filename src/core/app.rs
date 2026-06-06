@@ -201,6 +201,9 @@ pub struct App {
     // Transition between the answered card and the next one.  The core tracks
     // only the timing/phase; the terminal frontend owns the captured pixels.
     pub transition: Option<TransitionPhase>,
+    /// Wall-clock instant the current transition started, used to refund that
+    /// time from the challenge countdown (timer pauses during transitions).
+    transition_start: Option<Instant>,
     /// The next problem, shown as the transition's destination card.  Public so
     /// the frontend can render it during a transition.
     pub pending: Option<Active>,
@@ -271,6 +274,11 @@ impl App {
         let startup_index = if config.graphics == crate::config::GraphicsMode::Cpu { 1 } else { 0 };
         let roster = crate::student::Roster::load(storage.as_ref());
         let why_extras = crate::motivation::Extras::load(storage.as_ref());
+        // Seed menu state from the current student's saved preferences.
+        let (menu_grade, menu_ops, menu_units, menu_fractions, menu_percents, menu_geometry) = {
+            let s = roster.current();
+            (s.pref_grade, s.pref_ops, s.pref_units, s.pref_fractions, s.pref_percents, s.pref_geometry)
+        };
         App {
             screen: Screen::Startup,
             rng,
@@ -280,12 +288,12 @@ impl App {
             naming: false,
             name_input: String::new(),
             streak: 0,
-            menu_grade: 1,
-            menu_ops: [true, true, false, false],
-            menu_units: false,
-            menu_fractions: false,
-            menu_percents: false,
-            menu_geometry: false,
+            menu_grade,
+            menu_ops,
+            menu_units,
+            menu_fractions,
+            menu_percents,
+            menu_geometry,
             menu_index: 0,
             startup_index,
             settings_grade: 1,
@@ -308,6 +316,7 @@ impl App {
             input: String::new(),
             feedback: Feedback::None,
             transition: None,
+            transition_start: None,
             pending: None,
             help_active: false,
             help_in: 0.0,
@@ -350,6 +359,28 @@ impl App {
         self.roster.save(self.storage.as_ref());
     }
 
+    /// Copy menu selections into the current student's persisted preferences.
+    fn save_student_prefs(&mut self) {
+        let s = self.roster.current_mut();
+        s.pref_grade    = self.menu_grade;
+        s.pref_ops      = self.menu_ops;
+        s.pref_units    = self.menu_units;
+        s.pref_fractions = self.menu_fractions;
+        s.pref_percents = self.menu_percents;
+        s.pref_geometry = self.menu_geometry;
+    }
+
+    /// Restore the current student's saved preferences into the menu state.
+    fn load_student_prefs(&mut self) {
+        let s = self.roster.current();
+        self.menu_grade    = s.pref_grade;
+        self.menu_ops      = s.pref_ops;
+        self.menu_units    = s.pref_units;
+        self.menu_fractions = s.pref_fractions;
+        self.menu_percents = s.pref_percents;
+        self.menu_geometry = s.pref_geometry;
+    }
+
     fn save_extras(&self) {
         self.why_extras.save(self.storage.as_ref());
     }
@@ -376,8 +407,15 @@ impl App {
         }
 
         // Advance an in-flight transition; swap problems when it finishes.
+        // The challenge timer is refunded for the full transition duration so
+        // the clock only runs while the student is actually answering.
         if let Some(t) = &mut self.transition {
             if t.advance() {
+                if let Some(start) = self.transition_start.take() {
+                    if let Some(ch) = &mut self.challenge {
+                        ch.extend(start.elapsed());
+                    }
+                }
                 self.transition = None;
                 self.commit_pending();
                 self.input.clear();
@@ -533,8 +571,18 @@ impl App {
         match key {
             Key::Up => self.menu_index = (self.menu_index + MENU_ITEMS - 1) % MENU_ITEMS,
             Key::Down => self.menu_index = (self.menu_index + 1) % MENU_ITEMS,
-            Key::Left if self.menu_index == MI_STUDENT => self.roster.cycle(-1),
-            Key::Right if self.menu_index == MI_STUDENT => self.roster.cycle(1),
+            Key::Left if self.menu_index == MI_STUDENT => {
+                self.save_student_prefs();
+                self.roster.cycle(-1);
+                self.load_student_prefs();
+                self.save_roster();
+            }
+            Key::Right if self.menu_index == MI_STUDENT => {
+                self.save_student_prefs();
+                self.roster.cycle(1);
+                self.load_student_prefs();
+                self.save_roster();
+            }
             Key::Left if self.menu_index == MI_GRADE => {
                 self.menu_grade = self.menu_grade.saturating_sub(1);
             }
@@ -770,6 +818,17 @@ impl App {
                 s.reveal_lock = s.reveal_lock.saturating_sub(1);
                 self.save_roster();
             }
+            // [ / ] : adjust this student's challenge timer (15-second steps, 15–300 s).
+            Key::Char('[') => {
+                let s = &mut self.roster.students[self.teacher_rec_index];
+                s.challenge_secs = s.challenge_secs.saturating_sub(15).max(15);
+                self.save_roster();
+            }
+            Key::Char(']') => {
+                let s = &mut self.roster.students[self.teacher_rec_index];
+                s.challenge_secs = (s.challenge_secs + 15).min(300);
+                self.save_roster();
+            }
             _ => {}
         }
     }
@@ -980,6 +1039,9 @@ impl App {
     // -- session helpers ----------------------------------------------------
 
     fn start_session(&mut self, challenge: bool) {
+        // Persist the current menu state as this student's preferences.
+        self.save_student_prefs();
+        self.save_roster();
         self.grade = self.menu_grade;
         self.ops = Op::ALL.iter().copied().enumerate().filter(|(i, _)| self.menu_ops[*i]).map(|(_, op)| op).collect();
         self.units_enabled = self.menu_units;
@@ -1008,7 +1070,13 @@ impl App {
         self.wrong_streak = 0;
         self.encourage = None;
         self.cinematic = None;
-        self.challenge = if challenge { Some(Challenge::new(CHALLENGE_LEN)) } else { None };
+        let dur = if challenge {
+            let secs = self.roster.current().challenge_secs.max(15) as u64;
+            Duration::from_secs(secs)
+        } else {
+            CHALLENGE_LEN
+        };
+        self.challenge = if challenge { Some(Challenge::new(dur)) } else { None };
         // Pick the first problem (arithmetic or measurement).
         self.generate_pending();
         self.commit_pending();
@@ -1050,6 +1118,11 @@ impl App {
             // celebrations (which key off the arithmetic total).
             let topic = self.current_topic();
             self.roster.current_mut().record_topic(topic);
+            // Track how many problems solved at each grade level.
+            let g = self.grade as usize;
+            if g < 9 {
+                self.roster.current_mut().grade_solved[g] += 1;
+            }
             if matches!(topic, Topic::Add | Topic::Sub | Topic::Mul | Topic::Div) {
                 let total = self.roster.current().total();
                 if crate::cinematic::is_milestone(total) {
@@ -1078,6 +1151,7 @@ impl App {
     fn begin_transition(&mut self) {
         self.generate_pending();
         self.transition = Some(TransitionPhase::new(&mut self.rng));
+        self.transition_start = Some(Instant::now());
     }
 
     // -- Units of Measure (mixed into sessions) -----------------------------

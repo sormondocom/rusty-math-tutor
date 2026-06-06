@@ -31,28 +31,38 @@ pub fn draw_arith(pm: &mut Pixmap, (cx0, cy0, cw, ch): (f32, f32, f32, f32), p: 
 /// `a op b = answer` on one line, the answer to the right of the `=`.
 #[allow(clippy::too_many_arguments)]
 fn draw_horizontal(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::problem::Problem, input: &str, accent: Rgb, acol: Rgb) {
-    let prompt = p.prompt();
-    let answer = if input.is_empty() { "?" } else { input };
-    let scale = fit_scale(&format!("{}  {}", prompt, answer), cw - 120.0, 6.0);
-    let gap = scale * 6.0;
-    let (pw, aw) = (text_width(&prompt, scale), text_width(answer, scale));
-    let x = cxc - (pw + gap + aw) / 2.0;
-    let y = cyc - glyph_h(scale) / 2.0;
-    text(pm, x, y, scale, &prompt, accent);
-    text(pm, x + pw + gap, y, scale, answer, acol);
+    let prompt  = p.prompt();
+    let answer  = if input.is_empty() { "?" } else { input };
+    let ans_ref = p.answer.to_string(); // stable sizing — never changes as user types
+
+    // Scale and centering are fixed to the known answer width so the layout
+    // never shifts when the typed answer grows from 1 to 2+ digits.
+    let scale  = fit_scale(&format!("{}  {}", prompt, ans_ref), cw - 120.0, 6.0);
+    let gap    = scale * 6.0;
+    let pw     = text_width(&prompt,  scale);
+    let aw_ref = text_width(&ans_ref, scale); // stable slot width
+    let aw     = text_width(answer,   scale); // live width (may be smaller)
+    let x      = cxc - (pw + gap + aw_ref) / 2.0;
+    let y      = cyc - glyph_h(scale) / 2.0;
+    text(pm, x,              y, scale, &prompt, accent);
+    // Right-align the live input inside the stable answer slot so digits land
+    // on the correct column as the student types (e.g. units before tens).
+    text(pm, x + pw + gap + aw_ref - aw, y, scale, answer, acol);
 }
 
 /// The stacked column form: operands right-aligned, a divider, the answer below.
 #[allow(clippy::too_many_arguments)]
 fn draw_vertical(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::problem::Problem, input: &str, accent: Rgb, acol: Rgb) {
     let (a, b) = (p.a.to_string(), p.b.to_string());
-    let ans = if input.is_empty() { "?".to_string() } else { input.to_string() };
-    let op = p.op.symbol().to_string();
+    let ans     = if input.is_empty() { "?".to_string() } else { input.to_string() };
+    let ans_ref = p.answer.to_string(); // fixed reference — never changes as user types
+    let op      = p.op.symbol().to_string();
 
-    let widest = [&a, &b, &ans].iter().map(|s| s.len()).max().unwrap_or(1);
-    let scale = fit_scale(&format!("{} {}", op, "0".repeat(widest)), cw - 200.0, 6.0);
+    // Size the column from the ACTUAL answer so the field never widens mid-problem.
+    let widest = [&a, &b, &ans_ref].iter().map(|s| s.len()).max().unwrap_or(1);
+    let scale  = fit_scale(&format!("{} {}", op, "0".repeat(widest)), cw - 200.0, 6.0);
 
-    let field = [&a, &b, &ans].iter().map(|s| text_width(s, scale)).fold(0.0_f32, f32::max);
+    let field = [&a, &b, &ans_ref].iter().map(|s| text_width(s, scale)).fold(0.0_f32, f32::max);
     let op_col = text_width(&op, scale) + scale * 8.0;
     let total_w = op_col + field;
     let x0 = cxc - total_w / 2.0;
@@ -96,12 +106,17 @@ fn draw_division_house(pm: &mut Pixmap, cxc: f32, cyc: f32, cw: f32, p: &crate::
     let margin = px * 0.24; // clear gap around the house lines
     let hgap = scale * 12.0; // horizontal gap divisor | wall | dividend
 
-    let (wd, wq, wv) = (text_width(&dividend, scale), text_width(&quotient, scale), text_width(&divisor, scale));
-    let total_w = wv + hgap + hgap + wd;
-    let x0 = cxc - total_w / 2.0;
-    let wall_x = x0 + wv + hgap;
+    let ans_ref   = p.answer.to_string(); // fixed reference for stable positioning
+    let (wd, wv)  = (text_width(&dividend, scale), text_width(&divisor, scale));
+    let wq_ref    = text_width(&ans_ref, scale); // stable quotient slot width
+    let wq        = text_width(&quotient, scale); // live width (may be smaller)
+    let total_w   = wv + hgap + hgap + wd;
+    let x0        = cxc - total_w / 2.0;
+    let wall_x    = x0 + wv + hgap;
     let dividend_x = wall_x + hgap;
-    let quotient_x = dividend_x + (wd - wq);
+    // Right-align the live input inside the stable answer slot (anchored to
+    // dividend's right edge), so digits land on the correct column as typed.
+    let quotient_x = dividend_x + (wd - wq_ref) + (wq_ref - wq);
 
     let total_h = 2.0 * gbot + 2.5 * margin - gtop;
     let q_y = cyc - total_h / 2.0;

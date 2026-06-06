@@ -244,7 +244,47 @@ pub fn draw_stats(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         y += row_h;
     }
 
-    y += 8.0;
+    // Grade-level sparkline — always rendered so students can see the section
+    // even before they have any grade data.  Empty grades show a dim slot.
+    {
+        y += 12.0;
+        let grade_max   = s.grade_solved.iter().copied().max().unwrap_or(0);
+        let grade_max_f = grade_max.max(1) as f32;
+        let bar_max_h   = 32.0_f32;
+        let cell_w      = block_w / 9.0;
+        let bw          = (cell_w * 0.55).max(8.0);
+        let baseline    = y + bar_max_h;
+
+        // Dim track line at the baseline so the section is always visible.
+        fill(pm, x, baseline, block_w, 1.0, TRACK);
+
+        for i in 0..9usize {
+            let count  = s.grade_solved[i];
+            let bar_h  = if count > 0 { (count as f32 / grade_max_f * bar_max_h).max(3.0) } else { 0.0 };
+            let cell_x = x + i as f32 * cell_w;
+            let bar_x  = cell_x + (cell_w - bw) / 2.0;
+
+            if bar_h > 0.0 {
+                fill(pm, bar_x, baseline - bar_h, bw, bar_h, CYAN);
+            }
+
+            // Grade label centred below the baseline.
+            let gname = if i == 0 { "K".to_string() } else { i.to_string() };
+            let lw    = text_width(&gname, 1.3);
+            let color = if count > 0 { WHITE } else { GRAY };
+            text(pm, cell_x + (cell_w - lw) / 2.0, baseline + 4.0, 1.3, &gname, color);
+
+            // Count below the label, only for non-zero grades.
+            if count > 0 {
+                let ns = count.to_string();
+                let nw = text_width(&ns, 1.2);
+                text(pm, cell_x + (cell_w - nw) / 2.0, baseline + 18.0, 1.2, &ns, YELLOW);
+            }
+        }
+
+        y = baseline + 36.0;
+    }
+
     if s.best_streak > 0 {
         text_centered(pm, cxc, y, 1.6, &format!("\u{2605} Best streak: {} in a row!", s.best_streak), YELLOW);
         y += 30.0;
@@ -373,8 +413,8 @@ fn draw_teacher_anecdotes(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
 }
 
 fn draw_teacher_records(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
-    let (name_w, col_w, total_w, lock_w) = (150.0, 52.0, 80.0, 70.0);
-    let table_w = name_w + 8.0 * col_w + total_w + lock_w;
+    let (name_w, col_w, total_w, lock_w, timer_w) = (150.0, 52.0, 80.0, 70.0, 70.0);
+    let table_w = name_w + 8.0 * col_w + total_w + lock_w + timer_w;
     let x0 = (wf - table_w) / 2.0;
     let scale = 1.3;
     // Right edge of section column `i` (with a little padding inside the cell).
@@ -391,7 +431,10 @@ fn draw_teacher_records(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         text_right(pm, col_right(i), hy, scale, c, color);
     }
     text_right(pm, x0 + name_w + 8.0 * col_w + total_w - 8.0, hy, scale, "Total", GRAY);
-    text_right(pm, x0 + table_w - 8.0, hy, scale, "Lock", GRAY);
+    let lock_right  = x0 + name_w + 8.0 * col_w + total_w + lock_w - 8.0;
+    let timer_right = x0 + table_w - 8.0;
+    text_right(pm, lock_right,  hy, scale, "Lock",  GRAY);
+    text_right(pm, timer_right, hy, scale, "Timer", GRAY);
 
     // Student rows, scrolled to keep the selection visible.
     let students = &app.roster.students;
@@ -411,12 +454,15 @@ fn draw_teacher_records(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
             text_right(pm, col_right(c), y, scale, &st.solved_for(t).to_string(), WHITE);
         }
         text_right(pm, x0 + name_w + 8.0 * col_w + total_w - 8.0, y, scale, &st.grand_total().to_string(), CYAN);
-        let lock = if st.reveal_lock == 0 { "off".to_string() } else { st.reveal_lock.to_string() };
-        text_right(pm, x0 + table_w - 8.0, y, scale, &lock, YELLOW);
+        let lock  = if st.reveal_lock == 0 { "off".to_string() } else { st.reveal_lock.to_string() };
+        let timer = format!("{}s", st.challenge_secs);
+        text_right(pm, lock_right,  y, scale, &lock,  YELLOW);
+        text_right(pm, timer_right, y, scale, &timer, CYAN);
         y += row_h;
     }
 
-    text_centered(pm, wf / 2.0, hf - 30.0, 1.3, "Up/Dn student   < > section   S/R reset   X remove   +/- lock(0=off)   Esc out", GRAY);
+    text_centered(pm, wf / 2.0, hf - 30.0, 1.3,
+        "Up/Dn student   < > section   S/R reset   X remove   +/- lock   [ ] timer   Esc out", GRAY);
 }
 
 /// Draw `s` right-aligned so its right edge sits at `right`.

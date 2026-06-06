@@ -111,6 +111,11 @@ pub fn draw_session(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     draw_card(pm, &app.current, &app.input, app.feedback, app.frac_progress(), app.anim_frame, app.config.layout, wf, hf);
     let (cx0, cy0, cw, ch) = card_rect(wf, hf);
 
+    // Challenge countdown — shown in the top-right corner of the card.
+    if let Some(ref chg) = app.challenge {
+        draw_challenge_timer(pm, chg, cx0, cy0, cw);
+    }
+
     // Deduction Duck's help panel slides up over the card when summoned (H).
     if app.help_in > 0.0 {
         draw_help(pm, app, (cx0, cy0, cw, ch));
@@ -119,6 +124,37 @@ pub fn draw_session(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     if app.why_active {
         draw_why(pm, app, (cx0, cy0, cw, ch));
     }
+}
+
+fn draw_challenge_timer(pm: &mut Pixmap, chg: &crate::app::Challenge, cx0: f32, cy0: f32, cw: f32) {
+    let remaining = chg.remaining_secs();
+    let total     = chg.duration_secs().max(1);
+    let frac      = (remaining as f32 / total as f32).clamp(0.0, 1.0);
+
+    let color = if chg.finished {
+        RED
+    } else if frac > 0.5 {
+        ACCENT
+    } else if frac > 0.25 {
+        YELLOW
+    } else {
+        RED
+    };
+
+    let time_str  = format!("{}:{:02}", remaining / 60, remaining % 60);
+    let scale     = 2.0;
+    let tw        = text_width(&time_str, scale);
+    let pad       = 10.0;
+    let tx        = cx0 + cw - tw - pad;
+    let ty        = cy0 + 14.0;
+
+    text(pm, tx, ty, scale, &time_str, color);
+
+    // Thin progress bar directly below the digits.
+    let bar_h = 4.0;
+    let bar_y = ty + scale * PX_PER_SCALE + 4.0;
+    fill(pm, tx, bar_y, tw, bar_h, GRAY);
+    fill(pm, tx, bar_y, tw * frac, bar_h, color);
 }
 
 /// Colour of the typed answer: green/red once checked, else cyan when typed.

@@ -244,6 +244,43 @@ pub fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
         y += 1;
     }
 
+    // Grade-level sparkline: always 3 rows so the section is visible even
+    // before the student has any grade data (empty grades show as '·').
+    {
+        let grade_max = s.grade_solved.iter().copied().max().unwrap_or(0);
+        const BLOCKS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        const NAMES:  [&str; 9] = ["K", "1", "2", "3", "4", "5", "6", "7", "8"];
+        const CW: usize = 4; // chars per grade column
+
+        // Row 1: grade names.
+        let mut row = "Grade: ".to_string();
+        for name in NAMES { row.push_str(&format!("{:<CW$}", name)); }
+        put_str(buf, col, y, row, Style::default().fg(Color::Gray));
+        y += 1;
+
+        // Row 2: block-character bars.
+        let mut row = "       ".to_string();
+        for i in 0..9usize {
+            let n = s.grade_solved[i];
+            let lvl = if n == 0 { 0 }
+                      else { ((n as f32 / grade_max as f32 * 8.0).round() as usize).clamp(1, 8) };
+            let ch = if lvl == 0 { '·' } else { BLOCKS[lvl] };
+            row.push_str(&format!("{:<CW$}", ch));
+        }
+        put_str(buf, col, y, row, Style::default().fg(Color::LightCyan));
+        y += 1;
+
+        // Row 3: counts (blank when zero).
+        let mut row = "       ".to_string();
+        for i in 0..9usize {
+            let n = s.grade_solved[i];
+            if n > 0 { row.push_str(&format!("{:<CW$}", n)); }
+            else      { row.push_str(&" ".repeat(CW)); }
+        }
+        put_str(buf, col, y, row, Style::default().fg(Color::LightYellow));
+        y += 1;
+    } // end grade sparkline block
+
     if s.best_streak > 0 {
         put_str(buf, col, y, format!("★ Best streak: {} in a row!", s.best_streak), Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD));
         y += 1;
@@ -303,7 +340,7 @@ fn draw_teacher_login(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_teacher_manage(f: &mut Frame, app: &App, area: Rect) {
     let buf = f.buffer_mut();
-    let col = area.left() + area.width.saturating_sub(60) / 2;
+    let col = area.left() + area.width.saturating_sub(70) / 2;
 
     // Tabs.
     let (a_style, r_style) = match app.teacher_view {
@@ -403,12 +440,12 @@ const REC_COL_W: u16 = 5;
 
 fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
     let sel_topic = app.teacher_topic;
-    // One compact column per section, then Total and the reveal Lock.
+    // One compact column per section, then Total, reveal Lock, and Timer.
     let mut header = format!("{:<width$}", "Student", width = REC_NAME_W as usize);
     for c in REC_COLS {
         header.push_str(&format!("{:>w$}", c, w = REC_COL_W as usize));
     }
-    header.push_str(&format!("{:>7}{:>6}", "Total", "Lock"));
+    header.push_str(&format!("{:>7}{:>6}{:>5}", "Total", "Lock", "Tmr"));
     let header_y = area.top() + 3;
     put_str(buf, col, header_y, &header, Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD));
     // Highlight the selected section's column header — this is what S/R resets.
@@ -431,12 +468,13 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         } else {
             Style::default().fg(Color::White)
         };
-        let lock = if s.reveal_lock == 0 { "off".to_string() } else { s.reveal_lock.to_string() };
+        let lock  = if s.reveal_lock == 0 { "off".to_string() } else { s.reveal_lock.to_string() };
+        let timer = format!("{}s", s.challenge_secs);
         let mut row = format!("{:<width$}", clip(&s.name, REC_NAME_W), width = REC_NAME_W as usize);
         for &t in &crate::topic::Topic::ALL {
             row.push_str(&format!("{:>w$}", s.solved_for(t), w = REC_COL_W as usize));
         }
-        row.push_str(&format!("{:>7}{:>6}", s.grand_total(), lock));
+        row.push_str(&format!("{:>7}{:>6}{:>5}", s.grand_total(), lock, timer));
         put_str(buf, col, y, &row, base);
         y += 1;
     }
@@ -451,7 +489,7 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         buf,
         col,
         area.bottom().saturating_sub(2),
-        "Up/Dn student   <> section   S/R reset   X remove   +/- lock(0=off)   Esc out",
+        "Up/Dn student   <> section   S/R reset   X remove   +/- lock   [ ] timer   Esc out",
         Style::default().fg(Color::DarkGray),
     );
 }

@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::topic::Topic;
 
-fn default_reveal_lock() -> u32 {
-    3
-}
+fn default_reveal_lock() -> u32 { 3 }
+fn default_challenge_secs() -> u32 { 60 }
+fn default_pref_grade() -> u8 { 1 }
+fn default_pref_ops() -> [bool; 4] { [true, true, false, false] }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Student {
@@ -34,6 +35,9 @@ pub struct Student {
     /// Geometry problems solved.
     #[serde(default)]
     pub geometry_solved: u32,
+    /// Problems solved broken down by grade level (index 0 = K, 1–8 = grades 1–8).
+    #[serde(default)]
+    pub grade_solved: [u32; 9],
     /// The student's personal best run of correct answers in a row.
     #[serde(default)]
     pub best_streak: u32,
@@ -41,6 +45,23 @@ pub struct Student {
     /// `0` means reveals are never locked.  Set by the teacher per student.
     #[serde(default = "default_reveal_lock")]
     pub reveal_lock: u32,
+    /// How long (seconds) this student's Challenge run lasts.  Set by teacher.
+    #[serde(default = "default_challenge_secs")]
+    pub challenge_secs: u32,
+
+    // --- Persisted menu preferences (restored when student is selected) ---
+    #[serde(default = "default_pref_grade")]
+    pub pref_grade: u8,
+    #[serde(default = "default_pref_ops")]
+    pub pref_ops: [bool; 4],
+    #[serde(default)]
+    pub pref_units: bool,
+    #[serde(default)]
+    pub pref_fractions: bool,
+    #[serde(default)]
+    pub pref_percents: bool,
+    #[serde(default)]
+    pub pref_geometry: bool,
 }
 
 impl Student {
@@ -52,8 +73,16 @@ impl Student {
             fractions_solved: 0,
             percents_solved: 0,
             geometry_solved: 0,
+            grade_solved: [0; 9],
             best_streak: 0,
             reveal_lock: default_reveal_lock(),
+            challenge_secs: default_challenge_secs(),
+            pref_grade: default_pref_grade(),
+            pref_ops: default_pref_ops(),
+            pref_units: false,
+            pref_fractions: false,
+            pref_percents: false,
+            pref_geometry: false,
         }
     }
 
@@ -109,12 +138,14 @@ impl Student {
     }
 
     /// Wipe all progress back to zero (teacher records admin).
+    /// Preferences and teacher-set limits are left untouched.
     pub fn reset(&mut self) {
         self.solved = [0; 4];
         self.units_solved = 0;
         self.fractions_solved = 0;
         self.percents_solved = 0;
         self.geometry_solved = 0;
+        self.grade_solved = [0; 9];
         self.best_streak = 0;
     }
 }

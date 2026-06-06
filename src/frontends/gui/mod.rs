@@ -9,19 +9,22 @@
 
 mod scene;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use softbuffer::{Context, Surface};
+use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
-use crate::app::App;
+use crate::app::{App, Feedback, Screen};
 use crate::input::{InputEvent, Key, Mods};
 
 /// Per-frame interval — matches the terminal's ~30 fps tick.
@@ -45,11 +48,29 @@ struct Gui<'a> {
     last_tick: Instant,
     /// Set when the user picked console graphics — hand back to the terminal.
     switch: bool,
+    /// Both card frames for the current transition, pre-downsampled to output
+    /// resolution so the per-tick blend operates on w×h pixels, not w·SS × h·SS.
+    transition_frames: Option<(Vec<u32>, Vec<u32>)>,
+    /// Downsampled output pixels from the last render.  When the visual state
+    /// hasn't changed we blit this directly and skip the full render + downsample.
+    last_output: Vec<u32>,
+    /// Hash of the visual state that produced `last_output`.
+    last_hash: u64,
 }
 
 impl<'a> Gui<'a> {
     fn new(app: &'a mut App) -> Self {
-        Gui { app, window: None, surface: None, mods: ModifiersState::empty(), last_tick: Instant::now(), switch: false }
+        Gui {
+            app,
+            window: None,
+            surface: None,
+            mods: ModifiersState::empty(),
+            last_tick: Instant::now(),
+            switch: false,
+            transition_frames: None,
+            last_output: Vec::new(),
+            last_hash: 0,
+        }
     }
 
     fn redraw(&mut self) {
@@ -57,37 +78,236 @@ impl<'a> Gui<'a> {
         let size = window.inner_size();
         let (w, h) = (size.width.max(1), size.height.max(1));
         let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
-        if surface.resize(nw, nh).is_err() {
-            return;
+        if surface.resize(nw, nh).is_err() { return; }
+
+        scene::set_theme(self.app.config.theme);
+
+        // Check whether the visual state changed since the last frame.
+        // If not, skip the expensive render+downsample and just blit the cache.
+        let new_hash = visual_hash(self.app, w, h);
+        let need_render = new_hash != self.last_hash
+            || self.last_output.len() != (w * h) as usize;
+
+        if need_render {
+            let (sw, sh) = (w * scene::SS, h * scene::SS);
+
+            // Transition: capture both cards once through the same pipeline as
+            // render() — including chalk inset, chalk_texture, and board frame —
+            // then downsample.  Blending pre-downsampled frames costs 9× fewer
+            // pixels per tick than blending at SS resolution.
+            if self.app.transition.is_some() {
+                let stale = self.transition_frames.as_ref()
+                    .map_or(true, |(v, _)| v.len() != (w * h) as usize);
+                if stale {
+                    let in_chalk = scene::is_chalk()
+                        && w > 2 * scene::FRAME_T
+                        && h > scene::FRAME_T + scene::FRAME_TRAY;
+                    let from_out = capture_frame(in_chalk, w, h, sw, sh, |p, cwf, chf| {
+                        scene::draw_card(
+                            p, &self.app.current, &self.app.input,
+                            Feedback::Correct, 1.0, self.app.anim_frame,
+                            self.app.config.layout, cwf, chf,
+                        );
+                    });
+                    let to_out = capture_frame(in_chalk, w, h, sw, sh, |p, cwf, chf| {
+                        if let Some(next) = &self.app.pending {
+                            scene::draw_card(
+                                p, next, "",
+                                Feedback::None, 0.0, self.app.anim_frame,
+                                self.app.config.layout, cwf, chf,
+                            );
+                        }
+                    });
+                    self.transition_frames = Some((from_out, to_out));
+                }
+            } else {
+                self.transition_frames = None;
+            }
+
+            if let (Some(phase), Some((from_out, to_out))) =
+                (&self.app.transition, &self.transition_frames)
+            {
+                // Blend pre-downsampled frames at output (w×h) resolution.
+                self.last_output.resize((w * h) as usize, 0);
+                scene::blend_output(
+                    &mut self.last_output, from_out, to_out,
+                    phase.effect,
+                    phase.progress.clamp(0.0, 1.0),
+                    w, h,
+                );
+            } else {
+                // Normal render — full SS render then downsample.
+                let pixmap = scene::render(self.app, w, h);
+                self.last_output = downsample(&pixmap, w, h);
+            }
+            self.last_hash = new_hash;
         }
 
-        // The scene renders at `SS×` resolution; box-average each SS×SS block
-        // down to one output pixel.  That supersample is our anti-aliasing —
-        // smooth edges without tiny-skia's (panicky) AA rasteriser.
-        let pixmap = scene::render(&*self.app, w, h);
+        // Present — always needed (softbuffer owns the surface buffer each frame).
         let Ok(mut buffer) = surface.buffer_mut() else { return };
-        let ss = scene::SS;
-        let sw = w * ss; // supersampled row stride
-        let n = (ss * ss).max(1);
-        let pixels = pixmap.pixels();
-        // tiny-skia premultiplied RGBA → softbuffer 0x00RRGGBB (frames are opaque).
-        for y in 0..h {
-            for x in 0..w {
-                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
-                for dy in 0..ss {
-                    let row = ((y * ss + dy) * sw) as usize;
-                    for dx in 0..ss {
-                        let p = pixels[row + (x * ss + dx) as usize];
-                        r += p.red() as u32;
-                        g += p.green() as u32;
-                        b += p.blue() as u32;
-                    }
-                }
-                buffer[(y * w + x) as usize] = ((r / n) << 16) | ((g / n) << 8) | (b / n);
-            }
-        }
+        buffer.copy_from_slice(&self.last_output);
         let _ = buffer.present();
     }
+}
+
+/// Cheap fingerprint of all app state that affects what gets rendered.
+/// If this matches the previous frame's hash we can skip rendering entirely.
+fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
+    let mut s = DefaultHasher::new();
+
+    // Window dimensions — a resize always forces a full re-render.
+    w.hash(&mut s);
+    h.hash(&mut s);
+
+    std::mem::discriminant(&app.screen).hash(&mut s);
+    std::mem::discriminant(&app.config.theme).hash(&mut s);
+    std::mem::discriminant(&app.config.layout).hash(&mut s);
+
+    match app.screen {
+        Screen::Practice | Screen::Challenge => {
+            app.input.hash(&mut s);
+            std::mem::discriminant(&app.feedback).hash(&mut s);
+            app.help_active.hash(&mut s);
+            // Duck ease: quantise to 64 steps so minor float noise doesn't retrigger.
+            ((app.help_in * 64.0) as u8).hash(&mut s);
+            app.why_active.hash(&mut s);
+            app.why_scroll.hash(&mut s);
+            app.frac_anim.hash(&mut s);
+            app.card_anim.hash(&mut s);
+            app.revealed.hash(&mut s);
+            app.encourage.hash(&mut s);
+            app.reprimand.hash(&mut s);
+            // Duck waddle only matters when the panel is visible.
+            if app.help_in > 0.01 { app.anim_frame.hash(&mut s); }
+            // Challenge countdown — 1-second granularity is enough for the display.
+            if let Some(ref c) = app.challenge { c.remaining_secs().hash(&mut s); }
+            // Transition progress — changes every tick during a transition.
+            if let Some(ref t) = app.transition {
+                ((t.progress * 128.0) as u8).hash(&mut s);
+            }
+        }
+        Screen::Menu => {
+            app.menu_index.hash(&mut s);
+            app.naming.hash(&mut s);
+            app.name_input.hash(&mut s);
+            app.roster.current.hash(&mut s);
+            app.anim_frame.hash(&mut s); // duck waddle in the margin
+        }
+        Screen::Stats => {
+            app.roster.current.hash(&mut s);
+        }
+        Screen::Settings => {
+            app.settings_grade.hash(&mut s);
+            app.settings_field.hash(&mut s);
+        }
+        Screen::Teacher => {
+            std::mem::discriminant(&app.teacher_view).hash(&mut s);
+            app.teacher_topic.hash(&mut s);
+            app.teacher_rec_index.hash(&mut s);
+            app.teacher_adding.hash(&mut s);
+            app.teacher_text.hash(&mut s);
+            app.teacher_msg.hash(&mut s);
+        }
+        Screen::Startup => {
+            app.startup_index.hash(&mut s);
+        }
+        Screen::Cinematic => {
+            // Cinematics animate every tick.
+            app.anim_frame.hash(&mut s);
+        }
+        Screen::Experiment => {
+            app.exp_category.hash(&mut s);
+            app.exp_amount.hash(&mut s);
+            app.exp_from.hash(&mut s);
+            app.exp_to.hash(&mut s);
+            app.exp_field.hash(&mut s);
+        }
+    }
+
+    s.finish()
+}
+
+/// Capture one transition card frame through the same pipeline that `render()`
+/// uses, so the captured pixel data matches normal rendering exactly.
+///
+/// In chalk mode: render into the inset area, apply `chalk_texture`, blit into
+/// the full frame, and add the board frame — then downsample.
+/// In other modes: render at full window size and downsample.
+fn capture_frame(
+    in_chalk: bool,
+    w: u32, h: u32,
+    sw: u32, sh: u32,
+    draw: impl FnOnce(&mut Pixmap, f32, f32),
+) -> Vec<u32> {
+    if in_chalk {
+        let ft   = scene::FRAME_T;
+        let ftry = scene::FRAME_TRAY;
+        let iw   = w - 2 * ft;
+        let ih   = h - ft - ftry;
+
+        // Render at inner (inset) dimensions — same as render() in chalk mode.
+        let mut inner = scene::card_frame(iw * scene::SS, ih * scene::SS,
+            |p| draw(p, iw as f32, ih as f32));
+        scene::chalk_texture(&mut inner);
+
+        // Blit into a full-size pixmap and paint the wooden frame.
+        let mut full = Pixmap::new(sw, sh)
+            .unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
+        full.fill(scene::col(scene::BG));
+        blit_pixmap(&mut full, &inner, ft * scene::SS, ft * scene::SS);
+        scene::draw_board_frame(&mut full);
+
+        downsample(&full, w, h)
+    } else {
+        let pm = scene::card_frame(sw, sh, |p| draw(p, w as f32, h as f32));
+        downsample(&pm, w, h)
+    }
+}
+
+/// Copy `src` into `dst` at pixel offset `(ox, oy)` — equivalent to the
+/// private `blit` in `render.rs`.
+fn blit_pixmap(dst: &mut Pixmap, src: &Pixmap, ox: u32, oy: u32) {
+    let (dw, dh) = (dst.width(), dst.height());
+    let (sw, sh) = (src.width(), src.height());
+    let spx = src.pixels();
+    let dpx = dst.pixels_mut();
+    for y in 0..sh {
+        let dy = oy + y;
+        if dy >= dh { break; }
+        let drow = (dy * dw) as usize;
+        let srow = (y  * sw) as usize;
+        for x in 0..sw {
+            let dx = ox + x;
+            if dx >= dw { break; }
+            dpx[drow + dx as usize] = spx[srow + x as usize];
+        }
+    }
+}
+
+/// Box-downsample an SS×-resolution pixmap to output (`w`×`h`) pixels.
+/// Returns a `Vec<u32>` in `0x00RRGGBB` order suitable for softbuffer.
+fn downsample(pm: &Pixmap, w: u32, h: u32) -> Vec<u32> {
+    let ss     = scene::SS;
+    let stride = w * ss;
+    let n      = (ss * ss).max(1);
+    let pixels = pm.pixels();
+    let mut out = vec![0u32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+            for dy in 0..ss {
+                let row = ((y * ss + dy) * stride) as usize;
+                for dx in 0..ss {
+                    let p = pixels[row + (x * ss + dx) as usize];
+                    r += p.red()   as u32;
+                    g += p.green() as u32;
+                    b += p.blue()  as u32;
+                }
+            }
+            out[(y * w + x) as usize] = ((r / n) << 16) | ((g / n) << 8) | (b / n);
+        }
+    }
+    out
 }
 
 impl ApplicationHandler for Gui<'_> {
@@ -95,13 +315,13 @@ impl ApplicationHandler for Gui<'_> {
         let attrs = Window::default_attributes()
             .with_title("Rusty Math Tutor")
             .with_active(true)
-            .with_inner_size(winit::dpi::LogicalSize::new(960.0, 680.0));
+            .with_fullscreen(Some(Fullscreen::Borderless(None)));
         let Ok(window) = event_loop.create_window(attrs) else { return };
         let window = Rc::new(window);
-        window.focus_window(); // claim keyboard focus on this fresh-process window
+        window.focus_window();
         let Ok(context) = Context::new(window.clone()) else { return };
         let Ok(surface) = Surface::new(&context, window.clone()) else { return };
-        window.request_redraw(); // paint the first frame immediately
+        window.request_redraw();
         self.window = Some(window);
         self.surface = Some(surface);
     }
@@ -118,7 +338,6 @@ impl ApplicationHandler for Gui<'_> {
                     if self.app.should_quit {
                         event_loop.exit();
                     } else if self.app.config.graphics != crate::config::GraphicsMode::Cpu {
-                        // The user chose console graphics — hand back to the terminal.
                         self.switch = true;
                         event_loop.exit();
                     } else if let Some(w) = &self.window {
@@ -143,7 +362,6 @@ impl ApplicationHandler for Gui<'_> {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        // Persist progress / settings on the way out.
         self.app.persist();
     }
 }
@@ -151,17 +369,17 @@ impl ApplicationHandler for Gui<'_> {
 /// Map a `winit` key press into a frontend-neutral [`InputEvent`].
 fn to_input(event: &KeyEvent, mods: ModifiersState) -> Option<InputEvent> {
     let key = match &event.logical_key {
-        WKey::Named(NamedKey::Enter) => Key::Enter,
-        WKey::Named(NamedKey::Escape) => Key::Esc,
+        WKey::Named(NamedKey::Enter)     => Key::Enter,
+        WKey::Named(NamedKey::Escape)    => Key::Esc,
         WKey::Named(NamedKey::Backspace) => Key::Backspace,
-        WKey::Named(NamedKey::Tab) => Key::Tab,
-        WKey::Named(NamedKey::ArrowUp) => Key::Up,
+        WKey::Named(NamedKey::Tab)       => Key::Tab,
+        WKey::Named(NamedKey::ArrowUp)   => Key::Up,
         WKey::Named(NamedKey::ArrowDown) => Key::Down,
         WKey::Named(NamedKey::ArrowLeft) => Key::Left,
-        WKey::Named(NamedKey::ArrowRight) => Key::Right,
-        WKey::Named(NamedKey::Space) => Key::Char(' '),
-        WKey::Character(s) => Key::Char(s.chars().next()?),
-        _ => return None,
+        WKey::Named(NamedKey::ArrowRight)=> Key::Right,
+        WKey::Named(NamedKey::Space)     => Key::Char(' '),
+        WKey::Character(s)               => Key::Char(s.chars().next()?),
+        _                                => return None,
     };
     Some(InputEvent::Key { key, mods: Mods { ctrl: mods.control_key() } })
 }

@@ -48,6 +48,7 @@ thread_local! {
     static THEME: Cell<crate::config::Theme> = const { Cell::new(crate::config::Theme::Default) };
 }
 
+
 pub fn set_theme(t: crate::config::Theme) {
     THEME.with(|c| c.set(t));
 }

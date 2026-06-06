@@ -21,6 +21,7 @@ mod transition;
 mod tests;
 
 pub use render::render;
+pub use transition::blend_output;
 
 // Everything below is re-exported so submodules see it through `use super::*;`.
 pub use board::*;
