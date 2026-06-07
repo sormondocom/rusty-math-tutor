@@ -496,11 +496,11 @@ pub fn draw_experiment(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let cat = Category::ALL[app.exp_category];
     let units_list = cat.units();
     let from = units_list[app.exp_from.min(units_list.len() - 1)];
-    let to = units_list[app.exp_to.min(units_list.len() - 1)];
+    let to   = units_list[app.exp_to  .min(units_list.len() - 1)];
     let amount: f64 = app.exp_amount.parse().unwrap_or(0.0);
     let result = units::convert(amount, from, to);
 
-    // A card, like the Practice session.
+    // Card.
     let cw = (wf * 0.86).min(900.0);
     let ch = (hf * 0.80).min(620.0);
     let (cx0, cy0) = ((wf - cw) / 2.0, (hf - ch) / 2.0);
@@ -511,40 +511,51 @@ pub fn draw_experiment(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     text_centered(pm, cxc, cy0 + 40.0, 2.2, "Experimentation - Unit Explorer", MAGENTA);
     text_centered(pm, cxc, cy0 + 84.0, 1.3, "Type any amount - even a silly one - and watch it convert!", GRAY);
 
-    // Editable fields.
+    // Split the card: left 58 % for fields + result, right 42 % for the duck.
+    let left_w  = cw * 0.58;
+    let right_x = cx0 + left_w;       // where the duck column begins
+
+    // --- Left column: editable fields ---
     let amount_display = if app.exp_amount.is_empty() { "0".to_string() } else { app.exp_amount.clone() };
     let caret = if app.exp_field == 0 { "_" } else { "" };
     let rows = [
-        ("Amount", format!("{}{}", amount_display, caret)),
-        ("From", format!("< {} >", from.plural)),
-        ("To", format!("< {} >", to.plural)),
+        ("Amount",   format!("{}{}", amount_display, caret)),
+        ("From",     format!("< {} >", from.plural)),
+        ("To",       format!("< {} >", to.plural)),
         ("Category", format!("< {} >", cat.name())),
     ];
-    let x = cx0 + 90.0;
-    let value_x = x + 200.0;
-    let row_h = 46.0;
-    let top = cy0 + 140.0;
+    let label_x = cx0 + 36.0;
+    let value_x = label_x + 160.0;
+    let row_h   = 46.0;
+    let top     = cy0 + 140.0;
+
     for (i, (label, value)) in rows.iter().enumerate() {
         let y = top + i as f32 * row_h;
         let selected = i == app.exp_field;
         if selected {
-            fill(pm, x - 16.0, y - 8.0, cw - 148.0, 38.0, MAGENTA);
+            // Highlight only the label + value area — clipped to the left column.
+            let hi_w = (value_x - (label_x - 12.0) + text_width(value, 1.75) + 16.0)
+                .min(left_w - 24.0);
+            fill(pm, label_x - 12.0, y - 8.0, hi_w, 38.0, MAGENTA);
         }
         let (lc, vc) = if selected { (CARD_BG, CARD_BG) } else { (WHITE, CYAN) };
-        text(pm, x, y, 1.75, label, lc);
+        text(pm, label_x, y, 1.75, label, lc);
         text(pm, value_x, y, 1.75, value, vc);
     }
 
-    // The conversion, shown large and friendly.
-    text_centered(pm, cxc, cy0 + ch * 0.64, 1.6, &format!("{} {} is...", units::format_amount(amount), from.plural), GRAY);
-    text_centered(pm, cxc, cy0 + ch * 0.64 + 40.0, 3.2, &format!("= {} {}", units::format_amount(result), to.plural), CYAN);
+    // Conversion result, centred in the left column.
+    let left_cx = cx0 + left_w / 2.0;
+    let res_y   = cy0 + ch * 0.64;
+    text_centered(pm, left_cx, res_y,        1.6, &format!("{} {} =", units::format_amount(amount), from.plural), GRAY);
+    text_centered(pm, left_cx, res_y + 42.0, 3.2, &format!("{} {}", units::format_amount(result), to.plural), CYAN);
 
-    // Deduction Duck reacts (upper-right) when the physical size hits something
-    // recognisable — or is astronomically larger than anything on the list.
+    // --- Right column: Deduction Duck reaction ---
     let base_value = amount * from.to_base;
-    draw_exp_reaction(pm, (cx0, cy0, cw, ch), exp_reaction(cat, base_value), app.anim_frame);
+    draw_exp_reaction(pm, cx0, cy0, ch, right_x, cw - left_w, app.anim_frame,
+                      exp_reaction(cat, base_value));
 
-    text_centered(pm, cxc, cy0 + ch - 30.0, 1.4, "Up/Down field   Left/Right change   type digits   Esc menu", GRAY);
+    text_centered(pm, cxc, cy0 + ch - 30.0, 1.4,
+        "Up/Down field   Left/Right change   type digits   Esc menu", GRAY);
 }
 
 enum ExpReaction {
@@ -586,28 +597,57 @@ fn exp_reaction(cat: crate::units::Category, base_value: f64) -> ExpReaction {
     ExpReaction::None
 }
 
-/// Draw the duck's reaction in the card's upper-right, clear of the centred result.
-fn draw_exp_reaction(pm: &mut Pixmap, (cx0, cy0, cw, _ch): (f32, f32, f32, f32), reaction: ExpReaction, frame: u64) {
+/// Draw the duck reaction inside the right column `[col_x, col_x + col_w]`.
+/// Text is word-wrapped to stay within the column so it never bleeds into the
+/// fields on the left.
+#[allow(clippy::too_many_arguments)]
+fn draw_exp_reaction(
+    pm: &mut Pixmap,
+    _cx0: f32, cy0: f32, ch: f32,
+    col_x: f32, col_w: f32,
+    frame: u64,
+    reaction: ExpReaction,
+) {
     use std::f32::consts::TAU;
     let (fact, boom) = match reaction {
         ExpReaction::None => return,
         ExpReaction::Match(f) => (f, false),
         ExpReaction::Boom(f) => (f, true),
     };
-    let cell = 12.0;
-    let (duck_w, duck_h) = (9.0 * cell, 7.0 * cell * 1.25);
-    let duck_x = cx0 + cw - duck_w - 70.0;
-    let duck_y = cy0 + 150.0;
-    let dcx = duck_x + duck_w / 2.0;
+
+    let col_cx = col_x + col_w / 2.0;
+
+    // Duck sized to fit comfortably inside the column.
+    let cell   = 11.0_f32.min(col_w / 12.0);
+    let duck_w = 9.0 * cell;
+    let duck_h = 7.0 * cell * 1.25;
+    let duck_x = col_x + (col_w - duck_w) / 2.0;
+    // Centre the duck vertically in the card, leaving room for text above.
+    let duck_y = cy0 + (ch - duck_h) / 2.0 + 20.0;
+
+    // Word-wrap the fact text to the column width so it never overlaps left.
+    let fact_scale = 1.3_f32;
+    let max_text_w = col_w - 16.0;
+    let lines = wrap_words(&fact, max_text_w, fact_scale);
 
     let (headline, hc) = if boom { ("BOOM!", RED) } else { ("Whoa!", YELLOW) };
-    text_centered(pm, dcx, duck_y - 54.0, 2.2, headline, hc);
-    text_centered(pm, dcx, duck_y - 22.0, 1.3, &fact, hc);
+    let n_lines   = lines.len() as f32;
+    let line_h    = fact_scale * PX_PER_SCALE + 4.0;
+    let text_block_h = 2.2 * PX_PER_SCALE + 6.0 + n_lines * line_h;
+    // Place text block above the duck with a small gap.
+    let text_top  = duck_y - text_block_h - 10.0;
+
+    text_centered(pm, col_cx, text_top, 2.2, headline, hc);
+    let mut ty = text_top + 2.2 * PX_PER_SCALE + 6.0;
+    for line in &lines {
+        text_centered(pm, col_cx, ty, fact_scale, line, hc);
+        ty += line_h;
+    }
+
     draw_duck(pm, duck_x, duck_y, DuckPose::Stand, frame / 5, cell, DUCK);
 
     if boom {
-        // The mortarboard blows off in a ring of pieces around the head.
-        let (hx, hy) = (dcx, duck_y + duck_h * 0.1);
+        let (hx, hy) = (col_cx, duck_y + duck_h * 0.1);
         let r = 26.0 + (frame % 12) as f32 * 3.0;
         for k in 0..6 {
             let ang = k as f32 * TAU / 6.0;

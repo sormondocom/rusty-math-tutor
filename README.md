@@ -1,17 +1,33 @@
+<div align="center">
+
 # Rusty Math Tutor
 
-```
-                  .-----------------------.
-       ___       (  Quack! Let's do math!  )
-      [_____]     '--------------------.---'
-         |       .------------------.  /
-        __      /  RUSTY MATH TUTOR  \
-      <(o )__   '--------------------'
-       (  __)
-        ^^ ^^      ( Deduction Duck, at your service )
-```
+<table border="0" cellpadding="16"><tr>
+<td align="center" valign="middle">
+<img src="src/assets/duck_with_tie_and_hat.png" alt="Deduction Duck" height="220" />
+</td>
+<td align="left" valign="middle">
+<pre>
+     ___        .---------------------------.
+   [_____]     (   Quack! Let's do math!    )
+      |          '---------------------------'
+     __
+   &lt;(o )__
+    (  __)       RUSTY MATH TUTOR
+     ^^ ^^       — Deduction Duck, at your service
+</pre>
+</td>
+</tr></table>
 
 [![Latest release](https://img.shields.io/github/v/release/sormondocom/rusty-math-tutor?label=download&sort=semver)](https://github.com/sormondocom/rusty-math-tutor/releases/latest)
+
+<a href="https://buymeacoffee.com/sormondocom">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" />
+</a>
+
+</div>
+
+---
 
 ## ⬇️ Download — no compiling needed
 
@@ -23,7 +39,7 @@ Grab a ready-to-run program from the [**latest release**](https://github.com/sor
 | **Chromebook** — Intel / AMD | [rusty-math-tutor-linux-x86_64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-x86_64) |
 | **Chromebook** — ARM | [rusty-math-tutor-linux-aarch64](https://github.com/sormondocom/rusty-math-tutor/releases/latest/download/rusty-math-tutor-linux-aarch64) |
 
-- **Windows:** double-click the `.exe`, or run it from a terminal. It starts in the **console** view; pick **"CPU Graphics"** on the start screen (or run with `--gui`) and it opens a real **window** with software-rendered 2-D graphics — **no GPU required**. Same app, same one download — switch between the two views any time. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
+- **Windows:** double-click the `.exe` or run from a terminal. It starts in the **console** view; pick **"CPU Graphics"** on the start screen (or run with `--gui`) and it opens a real **window** with software-rendered 2-D graphics — **no GPU required**. Switch between the two views any time. If SmartScreen warns about an unrecognised app, choose *More info → Run anyway*.
 - **Chromebook:** these run in the built-in **Linux (Crostini)** environment — turn it on at *Settings → Advanced → Developers → Linux development environment*, then in the Linux terminal:
   ```sh
   chmod +x rusty-math-tutor-linux-x86_64   # the file you downloaded
@@ -35,103 +51,72 @@ Grab a ready-to-run program from the [**latest release**](https://github.com/sor
 
 ---
 
-**A console math tutor for kindergarten through 8th grade**, built in Rust.
-One problem fills the screen at a time so a young learner can focus — no visible
-queue, no ticking clock (the timed mode is opt-in). Mix and match the sections
-you want practised — **arithmetic, units of measure, fractions, percentages, and
-geometry** — and every correct answer melts into the next problem through a
-randomly chosen, GPU-free transition. Press **H** any time to summon
-**Deduction Duck** for a strategy or a hint.
+**A math tutor for kindergarten through 8th grade**, built in Rust. One problem fills the screen at a time so a young learner can focus. Mix and match any combination of **arithmetic, units of measure, fractions, percentages, and geometry** — every correct answer melts into the next through a randomly chosen GPU-free transition. Press **H** any time to summon **Deduction Duck** for a strategy or a hint.
 
-It is designed to be *lightweight*: pure terminal-cell rendering, no graphics
-card required. The goal is to help children, not to sell hardware.
+Two frontends, one binary: the **console TUI** runs anywhere a terminal does; the **CPU Graphics window** renders the full app in pixels — chalk boards, animated duck, particle transitions, and all — with no GPU required. Pick your view at launch and switch any time.
 
 ---
 
 ## Highlights
 
-- **One problem at a time**, drawn big in a hand-built block font.
+- **One problem at a time**, drawn large so a learner can focus.
 - **Eight learnable sections**, any combination mixed into a session:
-  - **Four operations** — addition, subtraction, multiplication, division — with
-    per-grade number ranges (K–8) that you can tune.
-  - **Units of Measure** — friendly conversion problems (cups, metres, grams,
-    minutes…) with a themed prop and a Deduction Duck how-to hint. The
-    **locality** sets the units and currency (US, UK, Canada, Australia, metric).
-  - **Fractions** — read off the shaded share of a shape that **materialises**
-    piece by piece: a bar, a grid, a **circle**, or a **triangle** (with clear
-    dividers). Answers are checked for *equivalence*, so `1/2` is accepted for
-    `2/4`.
+  - **Four arithmetic operations** — addition, subtraction, multiplication, division — with per-grade number ranges (K–8) that you can tune from the Teacher Area.
+  - **Units of Measure** — friendly conversion problems (cups, metres, grams, minutes…) with a how-to hint from Deduction Duck. The **locality** sets the units and currency (US, UK, Canada, Australia, metric).
+  - **Fractions** — read off the shaded share of a shape that **materialises** piece by piece: a bar, a grid, a **circle**, or a **triangle** (with clear dividers). Answers are checked for *equivalence*, so `1/2` is accepted for `2/4`.
   - **Percentages** — the same shapes, read as a whole-number percent out of 100.
-  - **Geometry** — **perimeter, area, and volume** of outlined shapes drawn as
-    polished text glyphs: rectangles, squares, triangles, **circles**, and a
-    3-D wireframe **box/cube**, each labelled with its dimensions. Circles are
-    answered **in terms of π** (you type the whole-number coefficient), so every
-    answer stays exact.
-  - **Experimentation** — a free-form unit explorer: type any amount (even a
-    silly one) and watch it convert between units.
-- **Horizontal or vertical layouts**: inline `12 + 7 = ?`, the stacked column
-  form, or the proper **long-division house** for `÷`.
+  - **Geometry** — **perimeter, area, and volume** of outlined shapes drawn as polished glyphs: rectangles, squares, triangles, **circles**, and a 3-D wireframe **box/cube**, each labelled with dimensions. Circle answers are typed **in terms of π** (the whole-number coefficient), so every answer stays exact.
+  - **Experimentation** — a free-form unit explorer: type any amount (even a silly one) and watch it convert between units while Deduction Duck reacts with a real-world comparison.
+- **Horizontal or vertical layouts**: inline `12 + 7 = ?`, the stacked column form, or the proper **long-division house** for `÷`. The answer slot is sized to the actual answer at problem generation time, so the layout never shifts as you type.
 - **Deduction Duck 🦆🎓** — press **H** for help on *any* problem:
-  - on arithmetic he doesn't just talk — he **walks a number line**, hopping
-    stop to stop (count-on, count-up, count-back, skip-counting, repeated
-    subtraction); **smashes** a number into place-value pieces (break-apart,
-    partial products, regrouping); or explains it step by step (make-a-ten,
-    doubling, think-multiplication, equal groups). Press **Space** for *another
-    way*.
-  - on units, fractions, percentages, and geometry he offers a how-to **hint**
-    (e.g. "Area = ½ × base × height").
-  - **Hint first** — the method shows first; press **R** to reveal the answer.
-- **A gentle peek cooldown** — leaning on **R** too often puts the answer on a
-  short cooldown, and Deduction Duck offers a kind, clever nudge instead ("A
-  garden won't grow unwatered — and your mind is the garden!"). Solving one
-  yourself earns the trust back. The limit is per-student and teacher-set.
-- **"Why am I learning this?"** — press **Y** on any section for a fresh handful
-  of real-world uses (sending rockets to space, carpet area, splitting a bill,
-  reading a 70% chance of rain…), plus an occasional **"for future coders"** peek
-  at a real line of this app's own code and why the math behind it matters.
-- **Pleasing random transitions** between problems: wipe, curtain, dissolve,
-  blinds, circle, slide, diagonal — and showy particle effects: the equation
-  **explodes**, **swirls** into the centre, or is celebrated with **fireworks**.
-- **Milestone celebrations** — reaching a milestone plays a short, name-
-  personalised cinematic. The showpiece is a starry night sky: either **rockets
-  launch and become the stars that spell the student's name** (then a blue comet
-  sweeps behind it), or the name is **written among streaking comets with a moon
-  rising beneath** — with Deduction Duck planted below, gazing up in awe.
-- **Optional Challenge mode** — a 60-second timer, a score, and an encouraging
-  summary. Totally opt-in. (A celebration never costs you time — the clock is
-  refunded.)
-- **Per-student progress** — each student has their own saved stats. The
-  **My Progress** screen celebrates *their own* effort with a friendly breakdown
-  across **every section** and a personal-best streak. There is deliberately
-  **no ranking or comparison** between students.
-- **Teacher Area** (password-gated) — add your own real-life "Why?" examples for
-  *each section*, set the measurement locality, and administer student records
-  (per-section counts, reset a section, reset a student, remove a student, set
-  the peek limit).
+  - On arithmetic he **walks a number line** (count-on, count-up, count-back, skip-counting, repeated subtraction); **smashes** a number into place-value pieces (break-apart, partial products, regrouping); or explains step by step (make-a-ten, doubling, think-multiplication, equal groups). Press **Space** for *another strategy*.
+  - On units, fractions, percentages, and geometry he offers a targeted **how-to hint**.
+  - **Hint first** — the method shows first; press **R** to reveal the worked answer.
+- **A gentle peek cooldown** — leaning on **R** too often puts the answer on a short cooldown, and the Duck offers a kind nudge instead ("A garden won't grow unwatered — and your mind is the garden!"). Solving one problem yourself earns back the trust. The limit is per-student and teacher-set.
+- **"Why am I learning this?"** — press **Y** on any section for a handful of real-world uses (sending rockets to space, carpet area, splitting a bill, reading a 70% chance of rain…), plus occasional **code peeks** at a real line of this app's source and the math behind it.
+- **Pleasing random transitions** between problems: wipe, curtain, dissolve, blinds, circle, slide, diagonal — and showy particle effects: the equation **explodes**, **swirls** into the centre, or is celebrated with **fireworks**, **starburst**, alien ships, or asteroids.
+- **Milestone celebrations** — reaching a milestone plays a short, name-personalised cinematic: rockets launch and become stars spelling the student's name, or the name is written among streaking comets with a moon rising beneath — with Deduction Duck looking on in awe.
+- **Challenge mode** — a timed run with a configurable countdown per student (15–300 seconds, set by the teacher), a live HUD above the card, and a full **end-of-run summary**:
+  - Problems solved per minute, accuracy %, and best streak this run.
+  - Breakdown by topic type and grade level.
+  - **R / Enter** to play again immediately; **Esc** to return to the menu.
+  - The clock pauses automatically during transitions and milestone cinematics — a fair chess-timer, not a harsh stopwatch.
+  - **Challenge history** persisted per student (last 50 runs); the Progress screen shows the most recent runs with rate, accuracy, and streak columns.
+- **Per-student preferences** — grade level, selected operations, and enabled sections are saved per student and restored automatically when switching students.
+- **Per-student progress** — the **My Progress** screen celebrates each student's own effort with a friendly bar chart across every section, a **grade-level sparkline** (K–8), personal-best streak, and the recent challenge history. Deliberately **no ranking or comparison** between students.
+- **Teacher Area** (password-gated):
+  - Add your own real-life "Why?" examples per section.
+  - Set the measurement locality.
+  - Administer student records: view counts per section, reset a section, reset all records, remove a student, set the answer-peek limit, configure the challenge timer, and **clear challenge history**.
+- **Themes** — choose a look in Settings: Default, Blackboard, or Chalkboard. The chalk themes render an animated wooden board frame with a chalk-texture overlay; the Duck and all figures are automatically adjusted to fit the aesthetic.
+
+---
+
+## CPU Graphics window
+
+The CPU Graphics mode renders the full app in pixels using `winit` + `softbuffer` + `tiny-skia` — no GPU, no OpenGL, no WebGPU. It's the exact same binary as the console build; pick "CPU Graphics" at launch (or pass `--gui`) and a borderless fullscreen window opens.
+
+**Performance details** worth noting:
+- **Hash-based frame caching** — the renderer fingerprints all visual state before each draw. If nothing changed (student is thinking, timer is between seconds) the render is skipped entirely and the cached frame is presented; the CPU is essentially idle between user actions.
+- **Transition optimisation** — both card frames are captured once at transition start and pre-downsampled to output resolution. The per-tick cost during the blend is just a pixel-merge over 2M pixels rather than a full 18M-pixel SS render, making transitions smooth at any screen size.
+- **Challenge HUD overlay** — the timer bar and solved count are rendered as a separate cached overlay and blitted after every frame, so they are never baked into transition captures. The timer display is frozen during transitions (the underlying clock is also paused), so there are no jumps.
 
 ---
 
 ## Build & run
 
-> Just want to use it? [**Download a ready-made executable**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) (see the table at the top) — no toolchain required. Build from source only if you want to hack on it.
+> Just want to use it? [**Download a ready-made executable**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) — no toolchain required. Build from source only if you want to hack on it.
 
 Requires a [Rust toolchain](https://rustup.rs/) (stable).
 
 ```sh
-cargo run --release           # unified build: console TUI + CPU-graphics window
+cargo run --release           # console TUI + CPU-graphics window
 cargo run --release -- --gui  # boot straight into the window
 ```
 
-Run it from a real terminal (it's a full-screen TUI). A window of about
-**80×24 or larger** is recommended — the walking-duck and smash animations fall
-back to a plain text view on very small windows. Choosing **CPU Graphics** on the
-start screen opens the native window; choosing console in the window's start
-screen returns you to the TUI. (Each switch launches a fresh process for the
-other view — a clean process gets proper keyboard focus, which an in-process
-switch doesn't reliably get on Windows.)
+Run it from a real terminal (it's a full-screen TUI). A window of about **80×24 or larger** is recommended — the walking-duck and smash animations fall back to plain text on very small windows.
 
-For a lean, console-only binary (no window deps — this is what the static musl
-Chromebook builds use):
+For a lean console-only binary (no window deps — what the static musl Chromebook builds use):
 
 ```sh
 cargo run --release --no-default-features
@@ -146,125 +131,102 @@ cargo test     # unit tests, including render-never-panics across screen sizes
 ## Controls
 
 ### Startup
-Choose a graphics mode (see *Current state* below), then **Enter**.
+Choose a graphics mode, then **Enter**. When launched with `--gui` the startup screen is skipped and the app opens directly on the menu.
 
 ### Menu
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Move between rows |
-| `← / →` | Change the highlighted setting (student, grade) |
+| `←` / `→` | Change the highlighted setting (student, grade) |
 | `Enter` / `Space` | Toggle / open the highlighted row |
 | `N` | Add a new student |
 | `Q` | Quit |
 
-Rows: **Student**, **Grade**, the four **operation toggles**, **Units of
-Measure**, **Fractions**, **Percentages**, **Geometry**, **Settings**, **My
-Progress**, **Teacher Area**, **Start Practice**, **Start Challenge**,
-**Experimentation**. (The problem **layout** — horizontal / stacked — now lives
-in **Settings**, alongside the number ranges and theme.)
+Rows: **Student**, **Grade**, the four **operation toggles**, **Units of Measure**, **Fractions**, **Percentages**, **Geometry**, **Settings**, **My Progress**, **Teacher Area**, **Start Practice**, **Start Challenge**, **Experimentation**.
 
 ### Practice / Challenge
 | Key | Action |
 |-----|--------|
 | `0`–`9` | Type your answer |
-| `/` | Separate a fraction answer (e.g. `2/4`) |
+| `/` | Separate a fraction answer (`2/4`) |
 | `-` | Leading minus (when negatives are allowed) |
 | `Enter` | Check |
 | `Backspace` | Edit |
-| `H` | Summon / dismiss Deduction Duck (works on every problem) |
+| `H` | Summon / dismiss Deduction Duck |
 | `R` | Reveal / hide the worked answer |
-| `Space` | Show another strategy (arithmetic, while the duck is out) |
-| `Y` | "Why am I learning this?" (every section) |
+| `Space` | Another strategy (arithmetic, while the duck is out) |
+| `Y` | "Why am I learning this?" |
 | `V` | Switch horizontal / vertical layout (arithmetic) |
-| `Esc` | Peel back an overlay, then return to the menu |
+| `Esc` | Close an overlay, then return to the menu |
 
-Fractions are typed as `a/b` (any equivalent form is accepted); percentages,
-geometry, and circle answers (the number before π) are typed as a whole number.
+Fractions are typed as `a/b` (any equivalent form accepted); geometry and circle answers (the coefficient before π) are typed as whole numbers.
+
+### Challenge summary screen
+Appears automatically when the countdown reaches zero.
+
+| Key | Action |
+|-----|--------|
+| `R` / `Enter` | Start a new challenge immediately |
+| `M` / `Esc` | Return to the menu |
 
 ### Teacher Area
-First visit asks you to **create a password**; later visits ask for it.
+First visit prompts you to **create a password**; later visits require it.  
 `Tab` switches between the two tools; `L` cycles the measurement **locality**.
-- **Why? Examples** — `← →` pick a **section** (any of the eight), `A` to add
-  your own real-life example for it.
-- **Student Records** — a column per section. `↑↓` pick a student, `← →` pick
-  the section to act on, `S` reset that section, `R` reset all of a student's
-  records, `X` remove a student, `+ / -` set the student's answer-peek limit.
+
+**Why? Examples** — `←` / `→` pick a section, `A` to add your own real-life example for it.
+
+**Student Records** — a column per section:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Pick a student |
+| `←` / `→` | Pick the active section column |
+| `S` | Reset that section's count for this student |
+| `R` | Reset all records for this student |
+| `X` | Remove this student |
+| `+` / `-` | Adjust the answer-peek limit (0 = never lock, max 9) |
+| `[` / `]` | Decrease / increase the challenge timer (15 s steps, 15–300 s) |
+| `C` | Clear this student's challenge history |
 
 ---
 
 ## Saved data
 
-Everything persists as plain JSON under your platform's config directory
-(`%APPDATA%\rusty-math-tutor\` on Windows, `~/.config/rusty-math-tutor/`
-elsewhere):
+Everything persists as plain JSON under your platform's config directory  
+(`%APPDATA%\rusty-math-tutor\` on Windows, `~/.config/rusty-math-tutor/` elsewhere):
 
 | File | Holds |
 |------|-------|
-| `config.json` | Per-grade number ranges, layout, graphics mode, measurement locality, teacher password (a salted hash) |
-| `students.json` | The roster and each student's progress (per-section counts, best streak, peek limit) |
+| `config.json` | Per-grade number ranges, layout, graphics mode, measurement locality, theme, teacher password (salted hash) |
+| `students.json` | Roster and each student's progress — per-section counts, grade-level breakdown, best streak, peek limit, challenge timer, menu preferences, and challenge history (last 50 runs) |
 | `why_extras.json` | Teacher-added "Why?" examples, per section |
 
-These are hand-editable. Forgot the teacher password? Delete the `"teacher"`
-field from `config.json` and the next visit will let you set a new one.
+These are hand-editable. Forgot the teacher password? Delete the `"teacher"` field from `config.json` and the next visit will let you set a new one.
 
 ---
 
-## Current state
+## What's built
 
-This is an actively evolving first-pass project. **Implemented and working
-today:**
+- **Eight problem sections** — four arithmetic operations, Units of Measure, Fractions, Percentages, and Geometry — freely mixed into a session, with K–8 grade scaling and configurable number ranges.
+- **Experimentation** unit explorer with per-locality units and currency, and Deduction Duck real-world size reactions.
+- **Horizontal / vertical / long-division** layouts with stable field sizing (no layout shift as you type).
+- **Deduction Duck** with number-line walking, place-value smash, and step-by-step talk-through strategies for arithmetic; targeted how-to hints for all other sections; hint-first reveal; strategy cycling; and a gentle answer-peek cooldown with a teacher-set limit.
+- **"Why am I learning this?"** for every section — teacher-editable examples and code peeks.
+- **Seven cell-based transitions** plus explode / swirl / fireworks / starburst / alien ships / asteroids particle effects, all GPU-free.
+- **Name-personalised milestone cinematics** — rocket-name and comet-and-moon night skies, with Deduction Duck gazing up in awe.
+- **Challenge mode** — per-student configurable timer (teacher-set), chess-timer pause during transitions and cinematics, end-of-run summary screen with accuracy and grade breakdown, and persistent challenge history per student.
+- **Per-student preferences** — grade, operations, and section settings saved and restored per student.
+- **Per-student progress** — section bar chart, grade-level sparkline (K–8), personal-best streak, and recent challenge history.
+- **Teacher Area** — Why? example editor, locality selector, student records table with per-section reset, student removal, peek-limit and challenge-timer adjustment, and challenge history clearing.
+- **CPU Graphics window** — software-rendered fullscreen window with chalk/blackboard themes, animated wooden board frame, hash-based frame caching, optimised transition blending, and a separate cached challenge HUD overlay.
+- **Single binary** — the terminal and window frontends share the same domain layer; switch between them at any time without restarting.
 
-- Eight sections — four operations, Units of Measure, Fractions, Percentages,
-  and Geometry (perimeter / area / volume of outlined shapes, including circles
-  in terms of π) — freely mixed into a session, with K–8 grade scaling and
-  configurable ranges.
-- The Experimentation unit explorer and per-locality units/currency.
-- Horizontal / vertical layouts incl. the long-division house.
-- Deduction Duck with number-line, smash, and talk-through strategies for
-  arithmetic and how-to hints for the other sections, hint-first reveal,
-  strategy cycling, and a gentle answer-peek cooldown.
-- "Why am I learning this?" for every section, with teacher-editable examples
-  and code peeks.
-- Seven cell-based transitions plus explode / swirl / fireworks particle
-  effects, and name-personalised milestone cinematics (rocket-name and
-  comet-and-moon night skies, with Deduction Duck looking on in awe).
-- Practice and timed Challenge modes.
-- Per-student profiles, a whole-journey progress screen, and the password-gated
-  Teacher Area with per-section Why? examples and records administration.
-- **CPU Graphics mode** — a software-rendered **window** (CPU only, never a GPU)
-  that draws the *whole* app in pixels: every section's figures, Deduction Duck
-  and his animated number-line / smash strategies, all the transitions, and the
-  milestone cinematics. It's the **same single binary** — pick "CPU Graphics" on
-  the start screen (or `--gui`) and the window opens; pick console graphics in the
-  window and the terminal comes back. The domain layer is renderer-agnostic so
-  both frontends drive the very same core.
-
-**Coming soon:**
-
-- Software **3-D** in the CPU-graphics window, a **web/WASM** build, and
-- More strategy visualisations, more section types, and richer student
-  insights.
+**Coming up:**
+- Web/WASM build and a software 3-D mode for the window.
+- More strategy visualisations and additional section types.
 
 ---
 
 ## License
 
-GPL-3.0. Built with [`ratatui`](https://ratatui.rs/) + `crossterm`.
-
----
-
-## Support
-
-If Rusty Math Tutor helps a kid in your life, you can buy me a coffee:
-
-### ☕ https://buymeacoffee.com/sormondocom
-
-```
-        ___
-      [_____]
-         |
-        __
-      <(o )__     Thanks for stopping by!
-       (  __)     — Deduction Duck
-        ^^ ^^
-```
+GPL-3.0. Built with [`ratatui`](https://ratatui.rs/) + `crossterm` (terminal) and [`winit`](https://github.com/rust-windowing/winit) + [`softbuffer`](https://github.com/rust-windowing/softbuffer) + [`tiny-skia`](https://github.com/RazrFalcon/tiny-skia) (window).
