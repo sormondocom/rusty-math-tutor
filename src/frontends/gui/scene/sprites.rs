@@ -18,7 +18,7 @@ static DUCK_CHALK: OnceLock<Option<Pixmap>> = OnceLock::new();
 pub fn duck_png() -> Option<&'static Pixmap> {
     DUCK_COLOR
         .get_or_init(|| {
-            let bytes = include_bytes!("../../../assets/deduction-duck-main.png");
+            let bytes = include_bytes!("../../../assets/duck_with_tie_and_hat.png");
             Pixmap::decode_png(bytes).ok()
         })
         .as_ref()

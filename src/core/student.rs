@@ -17,6 +17,37 @@ fn default_challenge_secs() -> u32 { 60 }
 fn default_pref_grade() -> u8 { 1 }
 fn default_pref_ops() -> [bool; 4] { [true, true, false, false] }
 
+/// A snapshot of one completed timed challenge run, persisted per student.
+/// Stored most-recent-last; the display reverses order to show newest first.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct ChallengeRecord {
+    pub solved: u32,
+    pub attempts: u32,
+    pub streak_peak: u32,
+    pub duration_secs: u64,
+    /// Correct answers indexed by topic (Add=0 Sub=1 Mul=2 Div=3
+    /// Units=4 Fractions=5 Percentages=6 Geometry=7).
+    #[serde(default)]
+    pub by_topic: [u32; 8],
+    /// Correct answers indexed by grade (0=K, 1–8).
+    #[serde(default)]
+    pub by_grade: [u32; 9],
+}
+
+impl ChallengeRecord {
+    /// Correct-answer rate per minute.
+    pub fn rate(&self) -> f32 {
+        if self.duration_secs == 0 { 0.0 } else { self.solved as f32 * 60.0 / self.duration_secs as f32 }
+    }
+    /// Accuracy as 0–100.
+    pub fn accuracy_pct(&self) -> u32 {
+        if self.attempts == 0 { 0 } else { (self.solved as f32 / self.attempts as f32 * 100.0).round() as u32 }
+    }
+}
+
+/// Maximum challenge runs kept in each student's history.
+pub const CHALLENGE_HISTORY_CAP: usize = 50;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Student {
     pub name: String,
@@ -62,6 +93,10 @@ pub struct Student {
     pub pref_percents: bool,
     #[serde(default)]
     pub pref_geometry: bool,
+
+    /// Completed challenge runs, oldest first.  Capped at [`CHALLENGE_HISTORY_CAP`].
+    #[serde(default)]
+    pub challenge_history: Vec<ChallengeRecord>,
 }
 
 impl Student {
@@ -83,6 +118,7 @@ impl Student {
             pref_fractions: false,
             pref_percents: false,
             pref_geometry: false,
+            challenge_history: Vec::new(),
         }
     }
 

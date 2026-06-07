@@ -10,6 +10,9 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 use ratatui::Frame;
 
 use crate::app::{App, TeacherView, SETTINGS_FIELDS};
+use crate::student::ChallengeRecord;
+
+const TOPIC_SYMBOLS: [&str; 8] = ["+", "\u{2212}", "\u{00D7}", "\u{00F7}", "units", "%", "\u{2044}", "\u{03C0}"];
 use crate::duck::{self, Pose};
 use crate::{font, problem};
 
@@ -289,6 +292,10 @@ pub fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     // An encouraging message that grows with effort — never a comparison.
     let msg = encouragement(total);
     put_str(buf, col, y, msg, Style::default().fg(Color::LightCyan));
+    y += 2;
+
+    // Challenge history — most recent first, up to 5 rows.
+    draw_challenge_history_rows(buf, &s.challenge_history, col, y, area);
 
     put_str(buf, col, area.bottom().saturating_sub(2), "Every problem makes you stronger.   Esc: back", Style::default().fg(Color::DarkGray));
 }
@@ -489,7 +496,7 @@ fn draw_teacher_records(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
         buf,
         col,
         area.bottom().saturating_sub(2),
-        "Up/Dn student   <> section   S/R reset   X remove   +/- lock   [ ] timer   Esc out",
+        "Up/Dn student   <> section   S/R reset   X remove   C clear history   +/- lock   [ ] timer   Esc out",
         Style::default().fg(Color::DarkGray),
     );
 }
@@ -537,4 +544,130 @@ pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         "Up / Down choose    Left / Right change    Esc save & back",
         Style::default().fg(Color::DarkGray),
     );
+}
+
+// -- Shared challenge-history table (used by draw_stats) --------------------
+
+fn draw_challenge_history_rows(buf: &mut Buffer, history: &[ChallengeRecord], col: u16, y: u16, area: Rect) {
+    if history.is_empty() { return; }
+    let max_rows = (area.bottom().saturating_sub(y + 3)) as usize;
+    let max_rows = max_rows.min(5);
+    if max_rows == 0 { return; }
+
+    put_str(buf, col, y, "Challenge History:", Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
+    put_str(buf, col, y + 1,
+        &format!("{:<10} {:<8} {:<14} {}", "Solved", "/min", "Accuracy", "Streak"),
+        Style::default().fg(Color::DarkGray));
+
+    let entries: Vec<&ChallengeRecord> = history.iter().rev().take(max_rows).collect();
+    for (i, rec) in entries.iter().enumerate() {
+        let row_y = y + 2 + i as u16;
+        let solved_str = format!("{}/{:.0}s", rec.solved, rec.duration_secs as f32);
+        let rate_str   = format!("{:.1}", rec.rate());
+        let acc_pct    = rec.accuracy_pct();
+        let acc_str    = format!("{}% ({}/{})", acc_pct, rec.solved, rec.attempts);
+        let streak_str = rec.streak_peak.to_string();
+        let acc_color  = if acc_pct >= 80 { Color::LightGreen } else if acc_pct >= 60 { Color::LightYellow } else { Color::LightRed };
+
+        put_str(buf, col,      row_y, format!("{:<10}", solved_str), Style::default().fg(Color::White));
+        put_str(buf, col + 10, row_y, format!("{:<8}",  rate_str),  Style::default().fg(Color::LightYellow));
+        put_str(buf, col + 18, row_y, format!("{:<14}", acc_str),   Style::default().fg(acc_color));
+        put_str(buf, col + 32, row_y, &streak_str,                   Style::default().fg(Color::LightMagenta));
+    }
+
+    if history.len() > max_rows {
+        let note_y = y + 2 + max_rows as u16;
+        put_str(buf, col, note_y,
+            &format!("+ {} more run{}", history.len() - max_rows, if history.len() - max_rows == 1 { "" } else { "s" }),
+            Style::default().fg(Color::DarkGray));
+    }
+}
+
+// -- Challenge End (summary) ------------------------------------------------
+
+pub fn draw_challenge_end(f: &mut Frame, app: &App, area: Rect) {
+    let Some(run) = &app.run else { return; };
+    let buf = f.buffer_mut();
+    let col = area.left() + area.width.saturating_sub(52) / 2;
+    let mut y = area.top() + 1;
+
+    // Title
+    put_str(buf, col, y, "CHALLENGE COMPLETE!", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD));
+    y += 2;
+
+    // Big solved count
+    let solved_str = run.solved.to_string();
+    font::draw_text(buf, center(area, font::text_width(&solved_str)), y, &solved_str, Style::default().fg(Color::White));
+    y += 6;
+    put_str(buf, center(area, 28), y,
+        &format!("problem{} in {}s", if run.solved == 1 { "" } else { "s" }, run.duration_secs),
+        Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
+    y += 2;
+
+    // Rate
+    let rate = if run.duration_secs > 0 {
+        run.solved as f32 * 60.0 / run.duration_secs as f32
+    } else { 0.0 };
+    put_str(buf, col, y, format!("Per minute:    {:.1}", rate), Style::default().fg(Color::LightYellow));
+    y += 1;
+
+    // Accuracy
+    if run.attempts > 0 {
+        let pct = (run.solved as f32 / run.attempts as f32 * 100.0).round() as u32;
+        let color = if pct >= 80 { Color::LightGreen } else if pct >= 60 { Color::LightYellow } else { Color::LightRed };
+        put_str(buf, col, y,
+            format!("Accuracy:      {}%  ({} / {} answers)", pct, run.solved, run.attempts),
+            Style::default().fg(color));
+        y += 1;
+    }
+
+    // Best streak this run
+    if run.streak_peak > 0 {
+        put_str(buf, col, y, format!("Best streak:   {} in a row", run.streak_peak), Style::default().fg(Color::LightMagenta));
+        y += 1;
+    }
+
+    // By-topic breakdown (non-zero only)
+    let active: Vec<(usize, u32)> = run.by_topic.iter().copied().enumerate().filter(|(_, n)| *n > 0).collect();
+    if !active.is_empty() {
+        y += 1;
+        let mut row = "By type:       ".to_string();
+        for (i, n) in &active {
+            row.push_str(&format!("{} {}   ", TOPIC_SYMBOLS[*i], n));
+        }
+        put_str(buf, col, y, row, Style::default().fg(Color::White));
+        y += 1;
+    }
+
+    // Grade sparkline
+    let grade_max = *run.by_grade.iter().max().unwrap_or(&0);
+    if grade_max > 0 {
+        y += 1;
+        const BLOCKS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        const NAMES:  [&str; 9] = ["K", "1", "2", "3", "4", "5", "6", "7", "8"];
+        const CW: usize = 4;
+
+        let mut grade_row   = "Grade:    ".to_string();
+        let mut bar_row     = "          ".to_string();
+        let mut count_row   = "          ".to_string();
+        for i in 0..9usize {
+            let n   = run.by_grade[i];
+            let lvl = if n == 0 { 0 }
+                      else { ((n as f32 / grade_max as f32 * 8.0).round() as usize).clamp(1, 8) };
+            grade_row .push_str(&format!("{:<CW$}", NAMES[i]));
+            bar_row   .push_str(&format!("{:<CW$}", if lvl == 0 { '·' } else { BLOCKS[lvl] }));
+            if n > 0 { count_row.push_str(&format!("{:<CW$}", n)); }
+            else      { count_row.push_str(&" ".repeat(CW)); }
+        }
+        put_str(buf, col, y,     grade_row,  Style::default().fg(Color::Gray));
+        put_str(buf, col, y + 1, bar_row,    Style::default().fg(Color::LightCyan));
+        put_str(buf, col, y + 2, count_row,  Style::default().fg(Color::LightYellow));
+        y += 3;
+    }
+    let _ = y;
+
+    // Footer
+    put_str(buf, col, area.bottom().saturating_sub(2),
+        "R / Enter: play again    M / Esc: menu",
+        Style::default().fg(Color::DarkGray));
 }

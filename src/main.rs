@@ -91,14 +91,15 @@ fn main() -> Result<()> {
     let mut app = App::new(config, storage);
 
     // Always default to the console, whatever was last persisted — the CPU-graphics
-    // window opens only when the user picks it in the picker.  `--gui` boots
-    // straight into the window's startup picker (CPU pre-selected).
+    // window opens only when the user picks it in the picker.  `--gui` skips the
+    // picker entirely and opens straight on the menu.
     app.config.graphics = config::GraphicsMode::Low;
     app.startup_index = 0;
     #[cfg(feature = "gui")]
     if std::env::args().any(|a| a == "--gui") {
         app.config.graphics = config::GraphicsMode::Cpu;
         app.startup_index = 1;
+        app.screen = crate::app::Screen::Menu;
     }
 
     // Run the frontend for this mode.  If the user switches mode in the picker,

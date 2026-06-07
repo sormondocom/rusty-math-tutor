@@ -34,14 +34,15 @@ pub fn render(app: &App, w: u32, h: u32) -> Pixmap {
 
 fn draw_screen(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     match app.screen {
-        Screen::Startup                  => draw_startup(pm, app, wf, hf),
-        Screen::Menu                     => draw_menu(pm, app, wf, hf),
+        Screen::Startup                      => draw_startup(pm, app, wf, hf),
+        Screen::Menu                         => draw_menu(pm, app, wf, hf),
         Screen::Practice | Screen::Challenge => draw_session(pm, app, wf, hf),
-        Screen::Settings                 => draw_settings(pm, app, wf, hf),
-        Screen::Stats                    => draw_stats(pm, app, wf, hf),
-        Screen::Teacher                  => draw_teacher(pm, app, wf, hf),
-        Screen::Cinematic                => draw_cinematic(pm, app, wf, hf),
-        Screen::Experiment               => draw_experiment(pm, app, wf, hf),
+        Screen::ChallengeEnd                 => draw_challenge_end(pm, app, wf, hf),
+        Screen::Settings                     => draw_settings(pm, app, wf, hf),
+        Screen::Stats                        => draw_stats(pm, app, wf, hf),
+        Screen::Teacher                      => draw_teacher(pm, app, wf, hf),
+        Screen::Cinematic                    => draw_cinematic(pm, app, wf, hf),
+        Screen::Experiment                   => draw_experiment(pm, app, wf, hf),
     }
 }
 

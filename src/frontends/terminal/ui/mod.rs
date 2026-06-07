@@ -17,7 +17,7 @@ pub use cards::{draw_duck_gag, render_card, render_geometry_card, render_shape_c
 pub use cinematic::draw_cinematic;
 pub use help::draw_help_overlay;
 pub use render::draw;
-pub use screens::{draw_menu, draw_settings, draw_startup, draw_stats, draw_teacher};
+pub use screens::{draw_challenge_end, draw_menu, draw_settings, draw_startup, draw_stats, draw_teacher};
 pub use session::{card_area, draw_experiment, draw_session};
 pub use toolkit::*;
 pub use transitions::Transitions;

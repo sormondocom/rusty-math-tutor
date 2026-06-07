@@ -444,7 +444,7 @@ fn draw_challenge_hud(f: &mut Frame, app: &App, area: Rect) {
 
     // A simple time bar across the row beneath the label.
     let total = c.duration_secs().max(1);
-    let frac = remaining as f32 / total as f32;
+    let frac = (remaining as f32 / total as f32).min(1.0);
     let bar_w = area.width.saturating_sub(2);
     let filled = (frac * bar_w as f32).round() as u16;
     let bar_color = if frac > 0.5 {

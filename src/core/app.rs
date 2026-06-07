@@ -41,6 +41,7 @@ pub enum Screen {
     Cinematic,
     Practice,
     Challenge,
+    ChallengeEnd,
     Experiment,
 }
 
@@ -99,34 +100,103 @@ pub enum TeacherView {
 // ---------------------------------------------------------------------------
 
 pub struct Challenge {
-    start: Instant,
-    duration: Duration,
-    pub solved: u32,
+    start:       Instant,
+    duration:    Duration,
+    /// Accumulated wall-clock time during which the timer was paused
+    /// (transitions + milestone cinematics).
+    paused:      Duration,
+    /// Set when the timer is currently paused; cleared by `resume()`.
+    pause_start: Option<Instant>,
+    pub solved:  u32,
     pub finished: bool,
 }
 
 impl Challenge {
     fn new(duration: Duration) -> Self {
-        Challenge { start: Instant::now(), duration, solved: 0, finished: false }
+        Challenge {
+            start: Instant::now(),
+            duration,
+            paused: Duration::ZERO,
+            pause_start: None,
+            solved: 0,
+            finished: false,
+        }
     }
 
-    /// Whole seconds left, rounded up so the clock starts at the full count.
+    /// Freeze the countdown.  Safe to call when already paused.
+    pub fn pause(&mut self) {
+        if self.pause_start.is_none() {
+            self.pause_start = Some(Instant::now());
+        }
+    }
+
+    /// Unfreeze the countdown, accumulating elapsed pause time.  Safe to call
+    /// when not paused.
+    pub fn resume(&mut self) {
+        if let Some(ps) = self.pause_start.take() {
+            self.paused += ps.elapsed();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ChallengeRun — per-session stats snapshot shown on ChallengeEnd screen
+// ---------------------------------------------------------------------------
+
+/// Stats accumulated during a single timed challenge run.
+/// Created in `start_session` and frozen (with `duration_secs` set) the moment
+/// the countdown reaches zero.
+#[derive(Debug, Clone, Default)]
+pub struct ChallengeRun {
+    /// Correct answers this run.
+    pub solved: u32,
+    /// Total answer submissions (correct + wrong).
+    pub attempts: u32,
+    /// Highest consecutive-correct streak reached.
+    pub streak_peak: u32,
+    /// Planned duration of this challenge in seconds.
+    pub duration_secs: u64,
+    /// Correct answers by topic index (Add=0 Sub=1 Mul=2 Div=3
+    /// Units=4 Fractions=5 Percentages=6 Geometry=7).
+    pub by_topic: [u32; 8],
+    /// Correct answers by grade (index 0 = K, 1–8 = grades 1–8).
+    pub by_grade: [u32; 9],
+}
+
+impl ChallengeRun {
+    fn new(duration_secs: u64) -> Self {
+        ChallengeRun { duration_secs, ..Default::default() }
+    }
+}
+
+#[allow(dead_code)]
+fn topic_idx(t: Topic) -> usize {
+    match t {
+        Topic::Add          => 0,
+        Topic::Sub          => 1,
+        Topic::Mul          => 2,
+        Topic::Div          => 3,
+        Topic::Units        => 4,
+        Topic::Fractions    => 5,
+        Topic::Percentages  => 6,
+        Topic::Geometry     => 7,
+    }
+}
+
+impl Challenge {
+    /// Whole seconds remaining, rounded up, accounting for any paused intervals.
+    /// Returns a stable value while the timer is paused — no jumps.
     pub fn remaining_secs(&self) -> u64 {
-        let rem = self.duration.checked_sub(self.start.elapsed()).unwrap_or(Duration::ZERO);
-        let secs = rem.as_secs() + if rem.subsec_nanos() > 0 { 1 } else { 0 };
+        let paused_total = self.paused
+            + self.pause_start.map_or(Duration::ZERO, |ps| ps.elapsed());
+        let active = self.start.elapsed().saturating_sub(paused_total);
+        let rem    = self.duration.checked_sub(active).unwrap_or(Duration::ZERO);
+        let secs   = rem.as_secs() + if rem.subsec_nanos() > 0 { 1 } else { 0 };
         secs.min(self.duration.as_secs())
     }
 
     pub fn duration_secs(&self) -> u64 {
         self.duration.as_secs()
-    }
-
-    /// Push the start forward by `d` — used to refund time spent in a
-    /// milestone cinematic so the countdown stays fair.
-    fn extend(&mut self, d: Duration) {
-        if let Some(start) = self.start.checked_add(d) {
-            self.start = start;
-        }
     }
 }
 
@@ -201,9 +271,6 @@ pub struct App {
     // Transition between the answered card and the next one.  The core tracks
     // only the timing/phase; the terminal frontend owns the captured pixels.
     pub transition: Option<TransitionPhase>,
-    /// Wall-clock instant the current transition started, used to refund that
-    /// time from the challenge countdown (timer pauses during transitions).
-    transition_start: Option<Instant>,
     /// The next problem, shown as the transition's destination card.  Public so
     /// the frontend can render it during a transition.
     pub pending: Option<Active>,
@@ -254,6 +321,9 @@ pub struct App {
     pub anim_frame: u64,
 
     pub challenge: Option<Challenge>,
+    /// Stats accumulated during the current timed run; frozen on expiry and
+    /// displayed on the ChallengeEnd screen.
+    pub run: Option<ChallengeRun>,
 
     // Milestone celebration.
     pub cinematic: Option<Cinematic>,
@@ -316,7 +386,6 @@ impl App {
             input: String::new(),
             feedback: Feedback::None,
             transition: None,
-            transition_start: None,
             pending: None,
             help_active: false,
             help_in: 0.0,
@@ -341,6 +410,7 @@ impl App {
             teacher_msg: None,
             anim_frame: 0,
             challenge: None,
+            run: None,
             cinematic: None,
             cinematic_return: Screen::Practice,
             wrong_streak: 0,
@@ -407,15 +477,10 @@ impl App {
         }
 
         // Advance an in-flight transition; swap problems when it finishes.
-        // The challenge timer is refunded for the full transition duration so
-        // the clock only runs while the student is actually answering.
+        // Advance the transition; resume the challenge clock when it ends.
         if let Some(t) = &mut self.transition {
             if t.advance() {
-                if let Some(start) = self.transition_start.take() {
-                    if let Some(ch) = &mut self.challenge {
-                        ch.extend(start.elapsed());
-                    }
-                }
+                if let Some(ch) = &mut self.challenge { ch.resume(); }
                 self.transition = None;
                 self.commit_pending();
                 self.input.clear();
@@ -439,8 +504,26 @@ impl App {
                 if !c.finished && c.remaining_secs() == 0 {
                     c.finished = true;
                     self.help_active = false;
+                    // Freeze the run stats and append to the student's history.
+                    if let Some(ref mut r) = self.run {
+                        r.duration_secs = c.duration_secs();
+                        let rec = crate::student::ChallengeRecord {
+                            solved:       r.solved,
+                            attempts:     r.attempts,
+                            streak_peak:  r.streak_peak,
+                            duration_secs: r.duration_secs,
+                            by_topic:     r.by_topic,
+                            by_grade:     r.by_grade,
+                        };
+                        let hist = &mut self.roster.current_mut().challenge_history;
+                        hist.push(rec);
+                        if hist.len() > crate::student::CHALLENGE_HISTORY_CAP {
+                            hist.remove(0);
+                        }
+                    }
                     // Lock in the progress earned during the timed run.
                     self.save_roster();
+                    self.screen = Screen::ChallengeEnd;
                 }
             }
         }
@@ -493,9 +576,8 @@ impl App {
 
     /// Tear down a cinematic and resume the lesson with the next problem.
     fn finish_cinematic(&mut self, c: Cinematic) {
-        if let Some(ch) = &mut self.challenge {
-            ch.extend(c.started.elapsed());
-        }
+        let _ = c.started; // field still exists in Cinematic, just unused here now
+        if let Some(ch) = &mut self.challenge { ch.resume(); }
         self.screen = self.cinematic_return;
         self.commit_pending();
         self.input.clear();
@@ -539,7 +621,22 @@ impl App {
                 }
             }
             Screen::Practice | Screen::Challenge => self.on_session_key(key),
+            Screen::ChallengeEnd => self.on_challenge_end_key(key),
             Screen::Experiment => self.on_experiment_key(key),
+        }
+    }
+
+    fn on_challenge_end_key(&mut self, key: Key) {
+        match key {
+            // R or Enter → immediately replay another challenge.
+            Key::Enter | Key::Char('r') | Key::Char('R') => self.start_session(true),
+            // Esc or M → back to the menu, clearing challenge state.
+            Key::Esc | Key::Char('m') | Key::Char('M') => {
+                self.run = None;
+                self.challenge = None;
+                self.screen = Screen::Menu;
+            }
+            _ => {}
         }
     }
 
@@ -829,6 +926,19 @@ impl App {
                 s.challenge_secs = (s.challenge_secs + 15).min(300);
                 self.save_roster();
             }
+            // C: clear this student's challenge history.
+            Key::Char('c') | Key::Char('C') => {
+                let s = &mut self.roster.students[self.teacher_rec_index];
+                let count = s.challenge_history.len();
+                let name  = s.name.clone();
+                s.challenge_history.clear();
+                self.save_roster();
+                self.teacher_msg = Some(if count == 0 {
+                    format!("{} has no challenge history.", name)
+                } else {
+                    format!("Cleared {} challenge run{} for {}.", count, if count == 1 { "" } else { "s" }, name)
+                });
+            }
             _ => {}
         }
     }
@@ -951,13 +1061,7 @@ impl App {
             }
         }
 
-        // Finished challenge: Enter starts a fresh run.
-        if self.challenge.as_ref().is_some_and(|c| c.finished) {
-            if key == Key::Enter {
-                self.start_session(true);
-            }
-            return;
-        }
+        // (challenge finished → transitioned to ChallengeEnd; unreachable here)
 
         // Ignore answer input while a transition is playing.
         if self.transition.is_some() {
@@ -1077,6 +1181,7 @@ impl App {
             CHALLENGE_LEN
         };
         self.challenge = if challenge { Some(Challenge::new(dur)) } else { None };
+        self.run = if challenge { Some(ChallengeRun::new(dur.as_secs())) } else { None };
         // Pick the first problem (arithmetic or measurement).
         self.generate_pending();
         self.commit_pending();
@@ -1123,6 +1228,15 @@ impl App {
             if g < 9 {
                 self.roster.current_mut().grade_solved[g] += 1;
             }
+
+            // Accumulate per-run stats for the end-of-challenge summary.
+            if let Some(ref mut r) = self.run {
+                r.solved += 1;
+                r.attempts += 1;
+                r.streak_peak = r.streak_peak.max(streak);
+                r.by_topic[topic_idx(topic)] += 1;
+                if g < 9 { r.by_grade[g] += 1; }
+            }
             if matches!(topic, Topic::Add | Topic::Sub | Topic::Mul | Topic::Div) {
                 let total = self.roster.current().total();
                 if crate::cinematic::is_milestone(total) {
@@ -1135,6 +1249,7 @@ impl App {
         } else {
             self.feedback = Feedback::Wrong;
             self.streak = 0;
+            if let Some(ref mut r) = self.run { r.attempts += 1; }
             // After a few tries the duck steps in (with a hint for either kind).
             self.wrong_streak += 1;
             if self.wrong_streak >= STRUGGLE_THRESHOLD {
@@ -1151,8 +1266,9 @@ impl App {
     fn begin_transition(&mut self) {
         self.generate_pending();
         self.transition = Some(TransitionPhase::new(&mut self.rng));
-        self.transition_start = Some(Instant::now());
+        if let Some(ch) = &mut self.challenge { ch.pause(); }
     }
+
 
     // -- Units of Measure (mixed into sessions) -----------------------------
 
@@ -1289,6 +1405,8 @@ impl App {
             started: Instant::now(),
         });
         self.screen = Screen::Cinematic;
+        // Pause the challenge clock for the entire cinematic duration.
+        if let Some(ch) = &mut self.challenge { ch.pause(); }
     }
 }
 

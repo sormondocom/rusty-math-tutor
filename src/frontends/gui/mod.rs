@@ -56,6 +56,10 @@ struct Gui<'a> {
     last_output: Vec<u32>,
     /// Hash of the visual state that produced `last_output`.
     last_hash: u64,
+    /// True once the first frame has been presented.  Key events arriving before
+    /// then are ignored — this absorbs any stale Enter/Space that was held in the
+    /// OS event queue when the terminal handed off to the GUI window.
+    ready: bool,
 }
 
 impl<'a> Gui<'a> {
@@ -70,6 +74,7 @@ impl<'a> Gui<'a> {
             transition_frames: None,
             last_output: Vec::new(),
             last_hash: 0,
+            ready: false,
         }
     }
 
@@ -147,6 +152,9 @@ impl<'a> Gui<'a> {
         let Ok(mut buffer) = surface.buffer_mut() else { return };
         buffer.copy_from_slice(&self.last_output);
         let _ = buffer.present();
+        // Gate key input until after the first frame is on screen, absorbing any
+        // stale Enter/Space held in the OS queue from the terminal hand-off.
+        self.ready = true;
     }
 }
 
@@ -210,6 +218,10 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
         }
         Screen::Startup => {
             app.startup_index.hash(&mut s);
+        }
+        Screen::ChallengeEnd => {
+            // Static once shown; hash solved count so a fresh run forces redraw.
+            if let Some(ref r) = app.run { r.solved.hash(&mut s); }
         }
         Screen::Cinematic => {
             // Cinematics animate every tick.
@@ -331,7 +343,7 @@ impl ApplicationHandler for Gui<'_> {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed {
+                if self.ready && event.state == ElementState::Pressed {
                     if let Some(ev) = to_input(&event, self.mods) {
                         self.app.on_event(ev);
                     }

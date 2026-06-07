@@ -26,6 +26,7 @@ pub fn draw(f: &mut Frame, app: &App, fx: &Transitions) {
         Screen::Teacher                      => draw_teacher(f, app, area),
         Screen::Cinematic                    => draw_cinematic(f, app, fx, area),
         Screen::Practice | Screen::Challenge => draw_session(f, app, fx, area),
+        Screen::ChallengeEnd                 => draw_challenge_end(f, app, area),
         Screen::Experiment                   => draw_experiment(f, app, area),
     }
 }

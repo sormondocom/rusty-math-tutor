@@ -6,7 +6,10 @@
 use tiny_skia::Pixmap;
 
 use crate::app::{App, TeacherView, ANECDOTE_MAX};
+use crate::student::ChallengeRecord;
 use crate::topic::Topic;
+
+const TOPIC_SYMBOLS: [&str; 8] = ["+", "\u{2212}", "\u{00D7}", "\u{00F7}", "units", "%", "\u{2044}", "\u{03C0}"];
 
 use super::*;
 
@@ -290,6 +293,10 @@ pub fn draw_stats(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         y += 30.0;
     }
     text_centered(pm, cxc, y, 1.5, encouragement(total), CYAN);
+    y += 34.0;
+
+    // Challenge history — most recent entries, newest first.
+    draw_challenge_history_table(pm, &s.challenge_history, cxc, y, hf);
 
     text_centered(pm, cxc, hf - 44.0, 1.5, "Every problem makes you stronger.    Esc: back", GRAY);
 }
@@ -462,7 +469,7 @@ fn draw_teacher_records(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     }
 
     text_centered(pm, wf / 2.0, hf - 30.0, 1.3,
-        "Up/Dn student   < > section   S/R reset   X remove   +/- lock   [ ] timer   Esc out", GRAY);
+        "Up/Dn student   < > section   S/R reset   X remove   C clear history   +/- lock   [ ] timer   Esc out", GRAY);
 }
 
 /// Draw `s` right-aligned so its right edge sits at `right`.
@@ -610,4 +617,141 @@ fn draw_exp_reaction(pm: &mut Pixmap, (cx0, cy0, cw, _ch): (f32, f32, f32, f32),
         text_centered(pm, duck_x - 10.0, duck_y + duck_h * 0.2, 1.4, "*", YELLOW);
         text_centered(pm, duck_x + duck_w + 10.0, duck_y + duck_h * 0.2, 1.4, "*", YELLOW);
     }
+}
+
+// -- Shared challenge-history table (used by draw_stats and draw_challenge_end)
+
+/// Render a compact table of the last ≤5 challenge runs, newest first.
+/// `cx` is the horizontal centre; `y0` is the top of the table.
+fn draw_challenge_history_table(pm: &mut Pixmap, history: &[ChallengeRecord], cx: f32, y0: f32, hf: f32) {
+    if history.is_empty() { return; }
+
+    let block_w = 520.0_f32;
+    let lx = cx - block_w / 2.0;
+    let available = hf - 60.0 - y0; // keep footer clear
+    if available < 30.0 { return; }
+
+    text(pm, lx, y0, 1.6, "Challenge History", CYAN);
+    let header_y = y0 + 22.0;
+    const COLS: [(&str, f32); 4] = [("Solved", 0.0), ("/min", 120.0), ("Accuracy", 220.0), ("Streak", 370.0)];
+    for (label, dx) in COLS {
+        text(pm, lx + dx, header_y, 1.3, label, GRAY);
+    }
+
+    let row_h = 22.0_f32;
+    let max_rows = ((available - 50.0) / row_h).floor().min(5.0) as usize;
+    let entries: Vec<&ChallengeRecord> = history.iter().rev().take(max_rows).collect();
+
+    for (i, rec) in entries.iter().enumerate() {
+        let ry = header_y + 18.0 + i as f32 * row_h;
+        let solved_str = format!("{}/{:.0}s", rec.solved, rec.duration_secs as f32);
+        let rate_str   = format!("{:.1}", rec.rate());
+        let acc_str    = format!("{}%  ({}/{})", rec.accuracy_pct(), rec.solved, rec.attempts);
+        let streak_str = rec.streak_peak.to_string();
+        text(pm, lx,         ry, 1.3, &solved_str, WHITE);
+        text(pm, lx + 120.0, ry, 1.3, &rate_str,   YELLOW);
+        text(pm, lx + 220.0, ry, 1.3, &acc_str,
+            if rec.accuracy_pct() >= 80 { ACCENT } else if rec.accuracy_pct() >= 60 { YELLOW } else { RED });
+        text(pm, lx + 370.0, ry, 1.3, &streak_str, YELLOW);
+    }
+
+    if history.len() > max_rows {
+        let remaining = history.len() - max_rows;
+        let note_y = header_y + 18.0 + max_rows as f32 * row_h;
+        text(pm, lx, note_y, 1.2, &format!("+ {} more run{}", remaining, if remaining == 1 { "" } else { "s" }), GRAY);
+    }
+}
+
+// -- Challenge End (summary) ------------------------------------------------
+
+pub fn draw_challenge_end(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    let Some(run) = &app.run else { return; };
+    let cx = wf / 2.0;
+
+    // Title
+    text_centered(pm, cx, 46.0, 4.0, "CHALLENGE COMPLETE!", ACCENT);
+
+    // Big solved number
+    text_centered(pm, cx, 110.0, 10.0, &run.solved.to_string(), WHITE);
+    text_centered(pm, cx, 210.0, 2.5,
+        &format!("problem{} in {}s", if run.solved == 1 { "" } else { "s" }, run.duration_secs),
+        CYAN);
+
+    // Stats block
+    let block_w = 500.0_f32;
+    let lx = (wf - block_w) / 2.0;   // left edge of stat labels
+    let vx = lx + 210.0;              // left edge of values
+    let mut y = 270.0_f32;
+    let row = 38.0_f32;
+
+    // Rate
+    let rate = if run.duration_secs > 0 {
+        run.solved as f32 * 60.0 / run.duration_secs as f32
+    } else { 0.0 };
+    text(pm, lx, y, 1.8, "Per minute:", GRAY);
+    text(pm, vx, y, 1.8, &format!("{:.1}", rate), YELLOW);
+    y += row;
+
+    // Accuracy
+    if run.attempts > 0 {
+        let pct = (run.solved as f32 / run.attempts as f32 * 100.0).round() as u32;
+        text(pm, lx, y, 1.8, "Accuracy:", GRAY);
+        text(pm, vx, y, 1.8,
+            &format!("{}%  ({} / {} answers)", pct, run.solved, run.attempts),
+            if pct >= 80 { ACCENT } else if pct >= 60 { YELLOW } else { RED });
+        y += row;
+    }
+
+    // Best streak
+    if run.streak_peak > 0 {
+        text(pm, lx, y, 1.8, "Best streak:", GRAY);
+        text(pm, vx, y, 1.8, &format!("{} in a row", run.streak_peak), YELLOW);
+        y += row;
+    }
+
+    // By-topic breakdown (only show non-zero topics)
+    let active_topics: Vec<(usize, u32)> = run.by_topic.iter()
+        .copied().enumerate().filter(|(_, n)| *n > 0).collect();
+    if !active_topics.is_empty() {
+        y += 8.0;
+        text(pm, lx, y, 1.8, "By type:", GRAY);
+        let mut tx = vx;
+        for (i, n) in &active_topics {
+            let s = format!("{} {}", TOPIC_SYMBOLS[*i], n);
+            text(pm, tx, y, 1.8, &s, WHITE);
+            tx += text_width(&s, 1.8) + 24.0;
+        }
+        y += row;
+    }
+
+    // Grade sparkline
+    let grade_max = *run.by_grade.iter().max().unwrap_or(&0);
+    if grade_max > 0 {
+        y += 8.0;
+        text(pm, lx, y, 1.6, "By grade:", GRAY);
+        let spark_x = vx;
+        let spark_w = block_w - (vx - lx);
+        let cell_w  = spark_w / 9.0;
+        let bw      = (cell_w * 0.55).max(6.0);
+        let bar_max_h = 24.0_f32;
+        let baseline  = y + bar_max_h + 4.0;
+        fill(pm, spark_x, baseline, spark_w, 1.0, [44, 48, 64]);
+        for i in 0..9usize {
+            let n = run.by_grade[i];
+            let bar_h = if n > 0 { (n as f32 / grade_max as f32 * bar_max_h).max(3.0) } else { 0.0 };
+            let cx_i  = spark_x + i as f32 * cell_w;
+            let bx    = cx_i + (cell_w - bw) / 2.0;
+            if bar_h > 0.0 { fill(pm, bx, baseline - bar_h, bw, bar_h, CYAN); }
+            let gname = if i == 0 { "K".to_string() } else { i.to_string() };
+            let lw    = text_width(&gname, 1.2);
+            text(pm, cx_i + (cell_w - lw) / 2.0, baseline + 4.0, 1.2, &gname,
+                if n > 0 { WHITE } else { GRAY });
+        }
+        y = baseline + 28.0;
+    }
+    let _ = y;
+
+    // Footer
+    text_centered(pm, cx, hf - 44.0, 1.5,
+        "R / Enter: play again    M / Esc: menu", GRAY);
 }
