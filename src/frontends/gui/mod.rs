@@ -60,6 +60,10 @@ struct Gui<'a> {
     /// then are ignored — this absorbs any stale Enter/Space that was held in the
     /// OS event queue when the terminal handed off to the GUI window.
     ready: bool,
+    /// Cached challenge HUD overlay (time bar + solved count) at output resolution.
+    /// Keyed on (sw, sh, remaining_secs, solved, in_chalk) and blitted over every
+    /// frame — blend or normal — so the timer never disappears during transitions.
+    hud_cache: Option<(u32, u32, u64, u32, bool, Vec<u32>)>,
 }
 
 impl<'a> Gui<'a> {
@@ -75,6 +79,7 @@ impl<'a> Gui<'a> {
             last_output: Vec::new(),
             last_hash: 0,
             ready: false,
+            hud_cache: None,
         }
     }
 
@@ -145,6 +150,45 @@ impl<'a> Gui<'a> {
                 let pixmap = scene::render(self.app, w, h);
                 self.last_output = downsample(&pixmap, w, h);
             }
+            // Challenge HUD overlay — time + progress bar + solved count.
+            // Applied here (inside need_render) so it is baked into last_output
+            // after every fresh render/blend.  On subsequent frames where nothing
+            // changed the hash is stable, need_render is false, and the cached
+            // last_output (which already contains the HUD) is presented directly.
+            // remaining_secs() is frozen during transitions via pause/resume, so
+            // the overlay doesn't change during the blend — no extra renders.
+            {
+                use crate::app::Screen;
+                let is_session = matches!(self.app.screen, Screen::Practice | Screen::Challenge);
+                if is_session {
+                    if let Some(ref chg) = self.app.challenge {
+                        let remaining = chg.remaining_secs();
+                        let total     = chg.duration_secs();
+                        let solved    = chg.solved;
+                        let in_chalk  = scene::is_chalk()
+                            && w > 2 * scene::FRAME_T
+                            && h > scene::FRAME_T + scene::FRAME_TRAY;
+
+                        let stale = self.hud_cache.as_ref().map_or(true, |(csw, csh, cr, cs, cic, _)| {
+                            *csw != sw || *csh != sh || *cr != remaining || *cs != solved || *cic != in_chalk
+                        });
+                        if stale {
+                            let hud = render_challenge_hud(w, h, sw, sh, remaining, total, solved, in_chalk);
+                            self.hud_cache = Some((sw, sh, remaining, solved, in_chalk, hud));
+                        }
+                        if let Some((_, _, _, _, _, ref hud)) = self.hud_cache {
+                            for (out, &hp) in self.last_output.iter_mut().zip(hud.iter()) {
+                                if hp != 0 { *out = hp; }
+                            }
+                        }
+                    } else {
+                        self.hud_cache = None;
+                    }
+                } else {
+                    self.hud_cache = None;
+                }
+            }
+
             self.last_hash = new_hash;
         }
 
@@ -294,6 +338,47 @@ fn blit_pixmap(dst: &mut Pixmap, src: &Pixmap, ox: u32, oy: u32) {
             dpx[drow + dx as usize] = spx[srow + x as usize];
         }
     }
+}
+
+/// Render the challenge HUD (time text + progress bar + solved count) into a
+/// transparent overlay at output resolution.  Non-zero pixels are blitted over
+/// `last_output`; zero pixels (transparent background) are left untouched.
+///
+/// Placed above the card in the top margin, matching the console HUD layout.
+fn render_challenge_hud(
+    w: u32, h: u32, sw: u32, sh: u32,
+    remaining: u64, total: u64, solved: u32,
+    in_chalk: bool,
+) -> Vec<u32> {
+    let mut pm = Pixmap::new(sw, sh)
+        .unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
+    // No fill — all pixels start transparent (zero); only drawn pixels are non-zero.
+
+    let wf  = w as f32;
+    let ft  = scene::FRAME_T as f32;
+    // Position in the margin above the card.  In chalk mode offset by FRAME_T
+    // so the HUD lands inside the board area, not in the wooden frame.
+    let top = if in_chalk { ft + 14.0 } else { 14.0 };
+
+    let frac  = (remaining as f32 / total.max(1) as f32).clamp(0.0, 1.0);
+    let color = if frac > 0.5 { scene::ACCENT } else if frac > 0.25 { scene::YELLOW } else { scene::RED };
+
+    let mins = remaining / 60;
+    let secs = remaining % 60;
+    let time_str = if mins > 0 { format!("{}:{:02}", mins, secs) } else { format!("{}s", secs) };
+    let label    = format!("{}    Solved: {}", time_str, solved);
+
+    scene::text_centered(&mut pm, wf / 2.0, top, 2.0, &label, color);
+
+    // Progress bar aligned with the card width, just below the text.
+    let card_w = (wf * 0.86).min(1020.0);
+    let bx     = (wf - card_w) / 2.0;
+    let by     = top + 2.0 * scene::PX_PER_SCALE + 6.0;
+    let bh     = 6.0;
+    scene::fill(&mut pm, bx,             by, card_w,        bh, scene::GRAY);
+    scene::fill(&mut pm, bx,             by, card_w * frac, bh, color);
+
+    downsample(&pm, w, h)
 }
 
 /// Box-downsample an SS×-resolution pixmap to output (`w`×`h`) pixels.
