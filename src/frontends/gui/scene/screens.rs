@@ -170,7 +170,7 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
     v.push(MenuRow::Text("My Progress...".to_string()));
     v.push(MenuRow::Text("Teacher Area...".to_string()));
     v.push(MenuRow::Text(">  Start Practice".to_string()));
-    v.push(MenuRow::Text(">  Start Challenge".to_string()));
+    v.push(MenuRow::Text(format!(">  Start Challenge  ({}s)", app.roster.current().challenge_secs)));
     v.push(MenuRow::Text(">  Experimentation".to_string()));
     v
 }

@@ -84,7 +84,8 @@ pub fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push(("My Progress...".to_string(), "(Enter to view)"));
     items.push(("Teacher Area...".to_string(), "(password)"));
     items.push(("▶  Start Practice".to_string(), "(no timer)"));
-    items.push(("▶  Start Challenge".to_string(), "(60-second timer)"));
+    let challenge_hint = format!("({}s timer)", app.roster.current().challenge_secs);
+    items.push(("▶  Start Challenge".to_string(), challenge_hint.as_str()));
     items.push(("▶  Experimentation".to_string(), "(explore unit conversions)"));
 
     // Scroll the window so the selected item stays visible.

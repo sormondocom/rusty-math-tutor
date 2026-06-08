@@ -253,7 +253,7 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.settings_field.hash(&mut s);
         }
         Screen::Teacher => {
-            app.teacher_authed.hash(&mut s); // switches login→manage view on success
+            app.teacher_authed.hash(&mut s);
             std::mem::discriminant(&app.teacher_view).hash(&mut s);
             app.teacher_topic.hash(&mut s);
             app.teacher_rec_index.hash(&mut s);
@@ -261,6 +261,16 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.teacher_text.hash(&mut s);
             app.teacher_msg.hash(&mut s);
             if !app.teacher_authed { app.teacher_pw.len().hash(&mut s); }
+            if app.teacher_authed {
+                // Roster length catches student add / remove.
+                app.roster.students.len().hash(&mut s);
+                // Selected student mutable fields: timer ([/]), lock (+/-), counts (S/R).
+                if let Some(st) = app.roster.students.get(app.teacher_rec_index) {
+                    st.challenge_secs.hash(&mut s);
+                    st.reveal_lock.hash(&mut s);
+                    st.grand_total().hash(&mut s);
+                }
+            }
         }
         Screen::Startup => {
             app.startup_index.hash(&mut s);
