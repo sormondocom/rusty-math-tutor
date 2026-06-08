@@ -2,7 +2,7 @@
 name = "rusty-math-tutor"
 version = "0.4.0"
 edition = "2021"
-description = "A math tutor (K-8) that works on a plain old text con with pleasing random transitions between problems"
+description = "A math tutor (K-8) that works on a plain old text console, graphical consoles and web assembly with pleasing random transitions between problems"
 license = "GPL-3.0"
 
 [[bin]]
