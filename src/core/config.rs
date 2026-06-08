@@ -223,8 +223,10 @@ impl Config {
         if password.trim().is_empty() {
             return;
         }
-        let salt = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        // web_time is a drop-in for std::time that delegates to performance.now()
+        // on WASM; std::time::SystemTime panics on wasm32 (unsupported stub).
+        let salt = web_time::SystemTime::now()
+            .duration_since(web_time::SystemTime::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x1234_5678)
             | 1;
