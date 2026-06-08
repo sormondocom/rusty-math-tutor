@@ -20,6 +20,7 @@
 </tr></table>
 
 [![Latest release](https://img.shields.io/github/v/release/sormondocom/rusty-math-tutor?label=download&sort=semver)](https://github.com/sormondocom/rusty-math-tutor/releases/latest)
+[![Play in Browser](https://img.shields.io/badge/Play%20in%20Browser-WebAssembly-7ecfff?style=flat-square&logo=webassembly&logoColor=white)](https://sormondocom.github.io/rusty-math-tutor/)
 
 <a href="https://buymeacoffee.com/sormondocom">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" />
@@ -29,7 +30,15 @@
 
 ---
 
-## ⬇️ Download — no compiling needed
+## 🌐 Play in the browser — no install needed
+
+**[→ Open Rusty Math Tutor in your browser](https://sormondocom.github.io/rusty-math-tutor/)**
+
+The full app runs as a WebAssembly build — same game logic, same GPU-free pixel renderer, same transitions and themes, everything. Works on any modern browser on desktop, Chromebook, or phone. Progress is saved to your browser's `localStorage` and persists across visits.
+
+---
+
+## ⬇️ Download — desktop app
 
 Grab a ready-to-run program from the [**latest release**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) — no Rust, no build step:
 
@@ -53,7 +62,7 @@ Grab a ready-to-run program from the [**latest release**](https://github.com/sor
 
 **A math tutor for kindergarten through 8th grade**, built in Rust. One problem fills the screen at a time so a young learner can focus. Mix and match any combination of **arithmetic, units of measure, fractions, percentages, and geometry** — every correct answer melts into the next through a randomly chosen GPU-free transition. Press **H** any time to summon **Deduction Duck** for a strategy or a hint.
 
-Two frontends, one binary: the **console TUI** runs anywhere a terminal does; the **CPU Graphics window** renders the full app in pixels — chalk boards, animated duck, particle transitions, and all — with no GPU required. Pick your view at launch and switch any time.
+Three frontends, one domain: the **browser** (WASM), the **console TUI**, and the **CPU Graphics window** all share the same game logic — pick whichever fits your screen.
 
 ---
 
@@ -72,10 +81,10 @@ Two frontends, one binary: the **console TUI** runs anywhere a terminal does; th
   - On arithmetic he **walks a number line** (count-on, count-up, count-back, skip-counting, repeated subtraction); **smashes** a number into place-value pieces (break-apart, partial products, regrouping); or explains step by step (make-a-ten, doubling, think-multiplication, equal groups). Press **Space** for *another strategy*.
   - On units, fractions, percentages, and geometry he offers a targeted **how-to hint**.
   - **Hint first** — the method shows first; press **R** to reveal the worked answer.
-- **A gentle peek cooldown** — leaning on **R** too often puts the answer on a short cooldown, and the Duck offers a kind nudge instead ("A garden won't grow unwatered — and your mind is the garden!"). Solving one problem yourself earns back the trust. The limit is per-student and teacher-set.
-- **"Why am I learning this?"** — press **Y** on any section for a handful of real-world uses (sending rockets to space, carpet area, splitting a bill, reading a 70% chance of rain…), plus occasional **code peeks** at a real line of this app's source and the math behind it.
+- **A gentle peek cooldown** — leaning on **R** too often puts the answer on a short cooldown, and the Duck offers a kind nudge instead. Solving one problem yourself earns back the trust. The limit is per-student and teacher-set.
+- **"Why am I learning this?"** — press **Y** on any section for a handful of real-world uses, plus occasional **code peeks** at a real line of this app's source and the math behind it.
 - **Pleasing random transitions** between problems: wipe, curtain, dissolve, blinds, circle, slide, diagonal — and showy particle effects: the equation **explodes**, **swirls** into the centre, or is celebrated with **fireworks**, **starburst**, alien ships, or asteroids.
-- **Milestone celebrations** — reaching a milestone plays a short, name-personalised cinematic: rockets launch and become stars spelling the student's name, or the name is written among streaking comets with a moon rising beneath — with Deduction Duck looking on in awe.
+- **Milestone celebrations** — reaching a milestone plays a short, name-personalised cinematic with Deduction Duck looking on in awe.
 - **Challenge mode** — a timed run with a configurable countdown per student (15–300 seconds, set by the teacher), a live HUD above the card, and a full **end-of-run summary**:
   - Problems solved per minute, accuracy %, and best streak this run.
   - Breakdown by topic type and grade level.
@@ -83,55 +92,78 @@ Two frontends, one binary: the **console TUI** runs anywhere a terminal does; th
   - The clock pauses automatically during transitions and milestone cinematics — a fair chess-timer, not a harsh stopwatch.
   - **Challenge history** persisted per student (last 50 runs); the Progress screen shows the most recent runs with rate, accuracy, and streak columns.
 - **Per-student preferences** — grade level, selected operations, and enabled sections are saved per student and restored automatically when switching students.
-- **Per-student progress** — the **My Progress** screen celebrates each student's own effort with a friendly bar chart across every section, a **grade-level sparkline** (K–8), personal-best streak, and the recent challenge history. Deliberately **no ranking or comparison** between students.
+- **Per-student progress** — the **My Progress** screen shows a friendly bar chart across every section, a **grade-level sparkline** (K–8), personal-best streak, and the recent challenge history. Deliberately **no ranking or comparison** between students.
 - **Teacher Area** (password-gated):
   - Add your own real-life "Why?" examples per section.
   - Set the measurement locality.
   - Administer student records: view counts per section, reset a section, reset all records, remove a student, set the answer-peek limit, configure the challenge timer, and **clear challenge history**.
-- **Themes** — choose a look in Settings: Default, Blackboard, or Chalkboard. The chalk themes render an animated wooden board frame with a chalk-texture overlay; the Duck and all figures are automatically adjusted to fit the aesthetic.
+- **Themes** — choose a look in Settings: Default, Blackboard, or Chalkboard. The chalk themes render an animated wooden board frame with a chalk-texture overlay.
 
 ---
 
-## CPU Graphics window
+## Pixel renderer — browser, window, and beyond
 
-The CPU Graphics mode renders the full app in pixels using `winit` + `softbuffer` + `tiny-skia` — no GPU, no OpenGL, no WebGPU. It's the exact same binary as the console build; pick "CPU Graphics" at launch (or pass `--gui`) and a borderless fullscreen window opens.
+All three graphical frontends (browser, CPU window, and future targets) use the same `tiny-skia` software pixel pipeline:
 
-**Performance details** worth noting:
-- **Hash-based frame caching** — the renderer fingerprints all visual state before each draw. If nothing changed (student is thinking, timer is between seconds) the render is skipped entirely and the cached frame is presented; the CPU is essentially idle between user actions.
-- **Transition optimisation** — both card frames are captured once at transition start and pre-downsampled to output resolution. The per-tick cost during the blend is just a pixel-merge over 2M pixels rather than a full 18M-pixel SS render, making transitions smooth at any screen size.
-- **Challenge HUD overlay** — the timer bar and solved count are rendered as a separate cached overlay and blitted after every frame, so they are never baked into transition captures. The timer display is frozen during transitions (the underlying clock is also paused), so there are no jumps.
+**Performance details** worth knowing:
+- **Hash-based frame caching** — the renderer fingerprints all visual state before each draw. If nothing changed (student is thinking, timer is between seconds) the render is skipped entirely and the cached frame is reused; the CPU is essentially idle between user actions.
+- **Transition optimisation** — both card frames are captured once at transition start and pre-downsampled to output resolution. The per-tick blend cost is just a pixel-merge over the output buffer rather than a full supersampled re-render, making transitions smooth at any screen size.
+- **Challenge HUD overlay** — the timer bar and solved count are rendered as a separate overlay and blitted after every frame, so they are never baked into transition captures. The clock is also paused during transitions, so there are no jumps.
+- **Supersampled rendering (SS=3)** — every scene is rendered at 3× output resolution and box-filtered down, giving clean anti-aliased edges on shapes, geometry figures, and the duck without a GPU.
+
+**Browser specifics:**
+- The WASM build uses the same pixel pipeline with the rendered frames written to a `<canvas>` via `ImageData`. Touch events (swipe to navigate, on-screen numeric keypad) are supported for phones and tablets.
+- Progress is persisted in `localStorage`; a first visit creates the default roster automatically.
+- The GitHub Actions workflow rebuilds and deploys the WASM bundle to GitHub Pages on every push to `main`.
 
 ---
 
 ## Build & run
 
-> Just want to use it? [**Download a ready-made executable**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) — no toolchain required. Build from source only if you want to hack on it.
+> Just want to use it? [**Play in the browser**](https://sormondocom.github.io/rusty-math-tutor/) or [**download an executable**](https://github.com/sormondocom/rusty-math-tutor/releases/latest) — no toolchain required. Build from source only if you want to hack on it.
 
-Requires a [Rust toolchain](https://rustup.rs/) (stable).
+### Desktop (console + window)
+
+Requires a [Rust toolchain](https://rustup.rs/) (nightly).
 
 ```sh
 cargo run --release           # console TUI + CPU-graphics window
 cargo run --release -- --gui  # boot straight into the window
 ```
 
-Run it from a real terminal (it's a full-screen TUI). A window of about **80×24 or larger** is recommended — the walking-duck and smash animations fall back to plain text on very small windows.
+Run it from a real terminal (it's a full-screen TUI). A window of about **80×24 or larger** is recommended.
 
-For a lean console-only binary (no window deps — what the static musl Chromebook builds use):
+For a lean console-only binary (no window deps):
 
 ```sh
 cargo run --release --no-default-features
 ```
 
 ```sh
-cargo test     # unit tests, including render-never-panics across screen sizes
+cargo test --bin tutor   # unit + render tests
+```
+
+### Browser (WASM)
+
+Requires [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/) and the nightly `wasm32-unknown-unknown` target:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+wasm-pack build --target web     # release build → pkg/
+```
+
+Serve locally (the browser requires HTTP — file:// won't work for WASM):
+
+```sh
+python -m http.server 8080
+# open http://localhost:8080/www/
 ```
 
 ---
 
 ## Controls
-
-### Startup
-Choose a graphics mode, then **Enter**. When launched with `--gui` the startup screen is skipped and the app opens directly on the menu.
 
 ### Menu
 | Key | Action |
@@ -160,6 +192,8 @@ Rows: **Student**, **Grade**, the four **operation toggles**, **Units of Measure
 | `Esc` | Close an overlay, then return to the menu |
 
 Fractions are typed as `a/b` (any equivalent form accepted); geometry and circle answers (the coefficient before π) are typed as whole numbers.
+
+On touch devices the on-screen keypad appears automatically during practice and challenge sessions.
 
 ### Challenge summary screen
 Appears automatically when the countdown reaches zero.
@@ -192,6 +226,7 @@ First visit prompts you to **create a password**; later visits require it.
 
 ## Saved data
 
+### Desktop
 Everything persists as plain JSON under your platform's config directory  
 (`%APPDATA%\rusty-math-tutor\` on Windows, `~/.config/rusty-math-tutor/` elsewhere):
 
@@ -203,30 +238,33 @@ Everything persists as plain JSON under your platform's config directory
 
 These are hand-editable. Forgot the teacher password? Delete the `"teacher"` field from `config.json` and the next visit will let you set a new one.
 
+### Browser (WASM)
+The same three JSON blobs are stored in `localStorage` under the same key names. Clear site data in your browser settings to reset, or open DevTools → Application → Local Storage to edit individual entries.
+
 ---
 
 ## What's built
 
 - **Eight problem sections** — four arithmetic operations, Units of Measure, Fractions, Percentages, and Geometry — freely mixed into a session, with K–8 grade scaling and configurable number ranges.
 - **Experimentation** unit explorer with per-locality units and currency, and Deduction Duck real-world size reactions.
-- **Horizontal / vertical / long-division** layouts with stable field sizing (no layout shift as you type).
-- **Deduction Duck** with number-line walking, place-value smash, and step-by-step talk-through strategies for arithmetic; targeted how-to hints for all other sections; hint-first reveal; strategy cycling; and a gentle answer-peek cooldown with a teacher-set limit.
+- **Horizontal / vertical / long-division** layouts with stable field sizing.
+- **Deduction Duck** with number-line walking, place-value smash, and step-by-step strategies for arithmetic; targeted hints for all other sections; hint-first reveal; strategy cycling; and a gentle answer-peek cooldown with a teacher-set limit.
 - **"Why am I learning this?"** for every section — teacher-editable examples and code peeks.
 - **Seven cell-based transitions** plus explode / swirl / fireworks / starburst / alien ships / asteroids particle effects, all GPU-free.
-- **Name-personalised milestone cinematics** — rocket-name and comet-and-moon night skies, with Deduction Duck gazing up in awe.
-- **Challenge mode** — per-student configurable timer (teacher-set), chess-timer pause during transitions and cinematics, end-of-run summary screen with accuracy and grade breakdown, and persistent challenge history per student.
-- **Per-student preferences** — grade, operations, and section settings saved and restored per student.
-- **Per-student progress** — section bar chart, grade-level sparkline (K–8), personal-best streak, and recent challenge history.
+- **Name-personalised milestone cinematics** — rocket-name and comet-and-moon night skies.
+- **Challenge mode** — per-student configurable timer, chess-timer pause, end-of-run summary with accuracy and grade breakdown, and persistent challenge history.
+- **Per-student preferences** and **per-student progress** with section bar chart, grade sparkline, and challenge history.
 - **Teacher Area** — Why? example editor, locality selector, student records table with per-section reset, student removal, peek-limit and challenge-timer adjustment, and challenge history clearing.
-- **CPU Graphics window** — software-rendered fullscreen window with chalk/blackboard themes, animated wooden board frame, hash-based frame caching, optimised transition blending, and a separate cached challenge HUD overlay.
-- **Single binary** — the terminal and window frontends share the same domain layer; switch between them at any time without restarting.
+- **Three frontends, one domain**:
+  - **Console TUI** — `ratatui` + `crossterm`, runs anywhere a terminal does.
+  - **CPU Graphics window** — `winit` + `softbuffer` + `tiny-skia`, software-rendered fullscreen window with chalk/blackboard themes, animated duck, and particle transitions.
+  - **Browser / WASM** — same pixel renderer compiled to WebAssembly, written to a `<canvas>` via `ImageData`, with `localStorage` persistence, touch input, and GitHub Pages deployment.
 
 **Coming up:**
-- Web/WASM build and a software 3-D mode for the window.
 - More strategy visualisations and additional section types.
 
 ---
 
 ## License
 
-GPL-3.0. Built with [`ratatui`](https://ratatui.rs/) + `crossterm` (terminal) and [`winit`](https://github.com/rust-windowing/winit) + [`softbuffer`](https://github.com/rust-windowing/softbuffer) + [`tiny-skia`](https://github.com/RazrFalcon/tiny-skia) (window).
+GPL-3.0. Built with [`ratatui`](https://ratatui.rs/) + `crossterm` (terminal), [`winit`](https://github.com/rust-windowing/winit) + [`softbuffer`](https://github.com/rust-windowing/softbuffer) + [`tiny-skia`](https://github.com/RazrFalcon/tiny-skia) (window), and [`wasm-bindgen`](https://github.com/rustwasm/wasm-bindgen) + [`web-sys`](https://github.com/rustwasm/wasm-bindgen/tree/main/crates/web-sys) (browser).
