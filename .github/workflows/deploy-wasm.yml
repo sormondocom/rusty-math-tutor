@@ -1,0 +1,83 @@
+name: Build and deploy WASM
+
+# Runs on every push to main and can be triggered manually.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required for the GitHub Pages deployment steps.
+permissions:
+  contents: read
+  pages:    write
+  id-token: write
+
+# Only one deployment runs at a time; skip queued runs but keep in-progress.
+concurrency:
+  group:              pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      # ── Source ─────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Rust toolchain ─────────────────────────────────────────────────────
+      # The project uses nightly for some language features; the wasm32 target
+      # must be added explicitly since it isn't bundled by default.
+      - name: Install Rust (nightly + wasm32)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Cache the Cargo registry and build artefacts so subsequent pushes are
+      # fast (only changed crates recompile).
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-
+
+      # ── wasm-pack ──────────────────────────────────────────────────────────
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      - name: Build WASM package
+        run: wasm-pack build --target web --release
+
+      # ── Assemble the Pages site ────────────────────────────────────────────
+      # www/index.html uses a `../pkg/` import path for local development
+      # (where the server root is the repo root and the page is at /www/).
+      # For GitHub Pages the site root IS the deploy dir, so we adjust the
+      # path to `./pkg/` in the deployed copy.
+      - name: Assemble deploy directory
+        run: |
+          mkdir -p deploy/pkg
+          sed 's|\.\./pkg/|./pkg/|g' www/index.html > deploy/index.html
+          cp pkg/rusty_math_tutor_bg.wasm \
+             pkg/rusty_math_tutor.js      \
+             pkg/rusty_math_tutor.d.ts    \
+             deploy/pkg/
+
+      # ── Deploy ─────────────────────────────────────────────────────────────
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

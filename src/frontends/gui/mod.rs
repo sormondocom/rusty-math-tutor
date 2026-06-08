@@ -253,12 +253,14 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.settings_field.hash(&mut s);
         }
         Screen::Teacher => {
+            app.teacher_authed.hash(&mut s); // switches login→manage view on success
             std::mem::discriminant(&app.teacher_view).hash(&mut s);
             app.teacher_topic.hash(&mut s);
             app.teacher_rec_index.hash(&mut s);
             app.teacher_adding.hash(&mut s);
             app.teacher_text.hash(&mut s);
             app.teacher_msg.hash(&mut s);
+            if !app.teacher_authed { app.teacher_pw.len().hash(&mut s); }
         }
         Screen::Startup => {
             app.startup_index.hash(&mut s);

@@ -3,7 +3,9 @@
 //! animation clock, and the hand-off into [`crate::transition`] when a problem
 //! is answered correctly.
 
-use std::time::{Duration, Instant};
+// web_time mirrors std::time exactly on native targets; on WASM it uses
+// performance.now() so the same code compiles and runs in the browser.
+use web_time::{Duration, Instant};
 
 use crate::input::{InputEvent, Key, Mods};
 use rand::rngs::ThreadRng;
@@ -61,7 +63,6 @@ pub struct Cinematic {
     pub dwell: u32,
     /// Scene-to-scene transition timing (the terminal frontend renders it).
     pub transition: Option<TransitionPhase>,
-    started: Instant,
 }
 
 // Menu row indices.
@@ -576,7 +577,7 @@ impl App {
 
     /// Tear down a cinematic and resume the lesson with the next problem.
     fn finish_cinematic(&mut self, c: Cinematic) {
-        let _ = c.started; // field still exists in Cinematic, just unused here now
+        let _ = c;
         if let Some(ch) = &mut self.challenge { ch.resume(); }
         self.screen = self.cinematic_return;
         self.commit_pending();
@@ -1402,7 +1403,6 @@ impl App {
             index: 0,
             dwell,
             transition: None,
-            started: Instant::now(),
         });
         self.screen = Screen::Cinematic;
         // Pause the challenge clock for the entire cinematic duration.

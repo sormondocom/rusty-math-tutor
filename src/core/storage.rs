@@ -14,15 +14,16 @@ pub trait Storage {
     fn save(&self, key: &str, data: &str);
 }
 
-/// An in-memory store — used by tests and as a "no persistence" fallback.
-/// (Test-only today; a future headless/web frontend can promote it.)
-#[cfg(test)]
+/// An in-memory store — used by tests and as a graceful fallback on WASM when
+/// `localStorage` is unavailable (e.g. private-browsing with cookies blocked).
+/// Progress won't survive a page reload in fallback mode, but the app still runs.
+#[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Default)]
 pub struct MemStorage {
     cells: std::cell::RefCell<std::collections::HashMap<String, String>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, target_arch = "wasm32"))]
 impl Storage for MemStorage {
     fn load(&self, key: &str) -> Option<String> {
         self.cells.borrow().get(key).cloned()

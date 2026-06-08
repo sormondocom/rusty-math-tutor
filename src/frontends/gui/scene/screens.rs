@@ -40,12 +40,15 @@ pub fn draw_menu(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         return;
     }
 
-    text_centered(pm, wf / 2.0, 26.0, 5.0, "RUSTY MATH TUTOR", WHITE);
+    // Scale 3.5 (was 5.0) — the title was too chunky and sat so close to
+    // y=0 that it clipped into the chalk board's top frame in chalk themes.
+    // y=38 gives a comfortable gap from both the chalk edge and the rows.
+    text_centered(pm, wf / 2.0, 38.0, 3.5, "RUSTY MATH TUTOR", WHITE);
 
     let rows = menu_rows(app);
     let scale = 1.75;
     let row_h = 28.0;
-    let top = 130.0;
+    let top = 105.0; // was 130 — move up to reclaim the space the smaller title freed
     let box_s = scale * 9.0;
     let label_dx = box_s + scale * 7.0; // toggle rows indent past their checkbox
     let row_w = |r: &MenuRow| match r {

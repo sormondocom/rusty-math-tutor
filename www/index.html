@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Rusty Math Tutor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0f0f1a; }
+
+    /* Canvas fills the whole viewport — Rust paints everything. */
+    #canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      image-rendering: pixelated;
+      touch-action: none; /* we handle all touch events ourselves */
+    }
+
+    /* ── Loading splash ────────────────────────────────────────────────── */
+    #splash {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      background: #0f0f1a;
+      font-family: 'Courier New', monospace; color: #7ecfff;
+      z-index: 100;
+    }
+    #splash h1 { font-size: 1.6rem; }
+    #splash p  { color: #888; font-size: 0.9rem; }
+    #splash.hidden { display: none; }
+
+    /* ── Status HUD (bottom-left, non-interactive) ─────────────────────── */
+    #hud {
+      position: fixed; bottom: 6px; left: 8px;
+      font: 11px/1.5 'Courier New', monospace;
+      color: rgba(255,255,255,0.2); pointer-events: none; user-select: none;
+    }
+
+    /* ── On-screen keypad (mobile) ─────────────────────────────────────── */
+    /* Shown only on Practice / Challenge screens on touch devices.         */
+    #keypad {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      display: none; /* shown by JS when needed */
+      flex-direction: column; gap: 4px;
+      padding: 6px; background: rgba(10,10,22,0.92);
+      backdrop-filter: blur(6px);
+      border-top: 1px solid #333;
+      z-index: 50;
+    }
+    #keypad.visible { display: flex; }
+
+    .krow {
+      display: flex; gap: 4px; justify-content: center;
+    }
+    .kbtn {
+      flex: 1; max-width: 80px;
+      padding: 14px 0;
+      background: #1e1e32; border: 1px solid #444; border-radius: 6px;
+      color: #e0e0e0; font: bold 18px 'Courier New', monospace;
+      text-align: center; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .kbtn:active { background: #2e2e50; }
+    .kbtn.wide   { max-width: 168px; } /* Enter spans two columns */
+    .kbtn.action { color: #7ecfff; }
+    .kbtn.del    { color: #ff8080; }
+  </style>
+</head>
+<body>
+
+  <div id="splash">
+    <h1>Rusty Math Tutor</h1>
+    <p id="splash-msg">Loading…</p>
+  </div>
+
+  <canvas id="canvas" tabindex="0"></canvas>
+
+  <!-- On-screen keypad for touch devices -->
+  <div id="keypad" aria-label="Numeric keypad">
+    <div class="krow">
+      <div class="kbtn" data-key="7">7</div>
+      <div class="kbtn" data-key="8">8</div>
+      <div class="kbtn" data-key="9">9</div>
+      <div class="kbtn action" data-key="H">H</div>
+    </div>
+    <div class="krow">
+      <div class="kbtn" data-key="4">4</div>
+      <div class="kbtn" data-key="5">5</div>
+      <div class="kbtn" data-key="6">6</div>
+      <div class="kbtn action" data-key="Y">Y</div>
+    </div>
+    <div class="krow">
+      <div class="kbtn" data-key="1">1</div>
+      <div class="kbtn" data-key="2">2</div>
+      <div class="kbtn" data-key="3">3</div>
+      <div class="kbtn del" data-key="Backspace">⌫</div>
+    </div>
+    <div class="krow">
+      <div class="kbtn" data-key="-">−</div>
+      <div class="kbtn" data-key="0">0</div>
+      <div class="kbtn" data-key="/">/</div>
+      <div class="kbtn action wide" data-key="Enter">Enter ✓</div>
+    </div>
+    <div class="krow">
+      <div class="kbtn action" data-key="Escape">Esc</div>
+      <div class="kbtn action" data-key="ArrowUp">▲</div>
+      <div class="kbtn action" data-key="ArrowDown">▼</div>
+      <div class="kbtn action" data-key="ArrowLeft">◀</div>
+      <div class="kbtn action" data-key="ArrowRight">▶</div>
+    </div>
+  </div>
+
+  <!-- Status HUD -->
+  <div id="hud">
+    <span id="hud-screen"></span>&nbsp;<span id="hud-fps"></span>
+  </div>
+
+  <script type="module">
+    import init, { WasmApp, greet } from '../pkg/rusty_math_tutor.js';
+
+    // ── DOM ─────────────────────────────────────────────────────────────
+    const canvas    = document.getElementById('canvas');
+    const splash    = document.getElementById('splash');
+    const splashMsg = document.getElementById('splash-msg');
+    const keypad    = document.getElementById('keypad');
+    const hudScreen = document.getElementById('hud-screen');
+    const hudFps    = document.getElementById('hud-fps');
+
+    // ── Detect touch device ──────────────────────────────────────────────
+    const isTouch = navigator.maxTouchPoints > 0;
+
+    // ── Canvas resize ────────────────────────────────────────────────────
+    // CSS keeps the canvas at 100vw × 100vh; we sync the pixel buffer here.
+    // On HiDPI screens devicePixelRatio > 1, giving us crisp output.
+    function resizeCanvas() {
+      // Reserve room for the keypad on touch devices so it doesn't overlap
+      // the bottom of the rendered scene.
+      const kh  = isTouch ? keypad.getBoundingClientRect().height : 0;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.height = (window.innerHeight - kh) + 'px';
+      canvas.width  = Math.round(window.innerWidth * dpr);
+      canvas.height = Math.round((window.innerHeight - kh) * dpr);
+    }
+    resizeCanvas();
+    window.addEventListener('resize', () => { resizeCanvas(); });
+
+    // ── Boot ─────────────────────────────────────────────────────────────
+    async function run() {
+      splashMsg.textContent = 'Compiling WASM…';
+      try { await init(); }
+      catch (e) {
+        splashMsg.textContent = '✗ ' + e.message;
+        splashMsg.style.color = '#ff6b6b';
+        return;
+      }
+
+      splashMsg.textContent = 'Starting…';
+      let app;
+      try {
+        app = new WasmApp();
+        app.bind_canvas('canvas');
+      } catch (e) {
+        splashMsg.textContent = '✗ ' + e;
+        splashMsg.style.color = '#ff6b6b';
+        return;
+      }
+
+      splash.classList.add('hidden');
+      canvas.focus();
+
+      // ── Keyboard input ────────────────────────────────────────────────
+      const APP_KEYS = new Set([
+        'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+        'Enter','Escape','Backspace','Tab',' ','/','-',
+      ]);
+      window.addEventListener('keydown', e => {
+        if (APP_KEYS.has(e.key) || e.key.length === 1) {
+          e.preventDefault();
+          app.on_key(e.key, e.ctrlKey);
+        }
+      });
+
+      // ── Touch — swipe navigation ──────────────────────────────────────
+      // Swiping navigates menus; tapping without moving sends Enter.
+      // The numeric keypad handles answer input on Practice/Challenge.
+      let touchX0, touchY0;
+      const SWIPE = 40; // px threshold
+
+      canvas.addEventListener('touchstart', e => {
+        touchX0 = e.touches[0].clientX;
+        touchY0 = e.touches[0].clientY;
+      }, { passive: true });
+
+      canvas.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - touchX0;
+        const dy = e.changedTouches[0].clientY - touchY0;
+        const ax = Math.abs(dx), ay = Math.abs(dy);
+
+        if (ax < SWIPE && ay < SWIPE) {
+          // Tap — Enter on non-session screens; keypad handles sessions.
+          const screen = app.screen_name();
+          if (screen !== 'Practice' && screen !== 'Challenge') {
+            app.on_key('Enter', false);
+          }
+        } else if (ay > ax) {
+          app.on_key(dy < 0 ? 'ArrowUp' : 'ArrowDown', false);
+        } else {
+          app.on_key(dx < 0 ? 'ArrowLeft' : 'ArrowRight', false);
+        }
+      }, { passive: true });
+
+      // ── On-screen keypad ──────────────────────────────────────────────
+      // Show only on touch devices and only during active play.
+      function updateKeypad() {
+        if (!isTouch) return;
+        const screen = app.screen_name();
+        const inGame = screen === 'Practice' || screen === 'Challenge';
+        keypad.classList.toggle('visible', inGame);
+        if (inGame) resizeCanvas(); // recalculate canvas height with keypad
+      }
+
+      keypad.addEventListener('pointerdown', e => {
+        const btn = e.target.closest('.kbtn');
+        if (!btn) return;
+        e.preventDefault();
+        const key = btn.dataset.key;
+        if (key) app.on_key(key, false);
+      });
+
+      // ── RAF loop ──────────────────────────────────────────────────────
+      // Tick at ~30 Hz (every other rAF); render every rAF for smooth feel.
+      // Frame caching in Rust means render() is a no-op when nothing changed.
+      let frame = 0, fpsFrames = 0, fpsT = performance.now();
+
+      function loop() {
+        if (app.should_quit()) {
+          splash.classList.remove('hidden');
+          splashMsg.textContent = 'See you next time! 🦆';
+          return;
+        }
+
+        frame++;
+        if (frame % 2 === 0) app.tick(); // ~30 Hz
+
+        app.render();                     // no-op when hash unchanged
+        updateKeypad();
+
+        // HUD refresh every ~0.5 s
+        fpsFrames++;
+        if (fpsFrames % 30 === 0) {
+          const now = performance.now();
+          const fps = Math.round(30000 / (now - fpsT));
+          fpsT = now;
+          hudScreen.textContent = app.screen_name();
+          hudFps.textContent    = fps + ' fps';
+        }
+
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    }
+
+    run();
+  </script>
+</body>
+</html>

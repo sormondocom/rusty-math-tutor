@@ -1,51 +1,62 @@
 [package]
 name = "rusty-math-tutor"
-version = "0.2.0"
+version = "0.4.0"
 edition = "2021"
-description = "A console math tutor (K-8) with pleasing random transitions between problems"
+description = "A math tutor (K-8) that works on a plain old text con with pleasing random transitions between problems"
 license = "GPL-3.0"
 
 [[bin]]
 name = "tutor"
 path = "src/main.rs"
 
+[lib]
+name = "rusty_math_tutor"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+test = false
+
 [features]
-# One unified binary by default: it boots into the console TUI, and choosing
-# "CPU Graphics" in the startup picker hands off to the native window (and back).
-# Lean / static targets (e.g. the musl Chromebook builds) drop the window with
-# `--no-default-features`, leaving a console-only binary.
 default = ["gui"]
 gui = ["dep:winit", "dep:softbuffer", "dep:tiny-skia", "dep:font8x8", "dep:ab_glyph"]
 
 [dependencies]
-# TUI — same lightweight stack as console-music-player.
-# Pure terminal cell rendering: no GPU, friendly to slow hardware.
-ratatui = "0.29"
-crossterm = "0.28"
-
-# Random problem + transition selection.
-rand = "0.8"
-
-# Error handling.
-anyhow = "1"
-
-# Persisted configuration (per-grade number ranges, layout preference).
-serde = { version = "1", features = ["derive"] }
+rand       = "0.8"
+anyhow     = "1"
+web-time   = "1"
+serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# CPU graphics mode (feature = "gui"): cross-platform window + software 2D
-# raster, never a GPU.  Optional so the default terminal build stays lean.
-winit = { version = "0.30", optional = true }
-softbuffer = { version = "0.4", optional = true }
-tiny-skia = { version = "0.11", optional = true }
-# CPU bitmap font (public-domain 8×8 ASCII) — GUI text fallback, no TTF needed.
-font8x8 = { version = "0.3", optional = true }
-# Anti-aliased TTF glyph rasteriser (a system font is loaded at runtime; the
-# 8×8 font is the fallback when none is found).
-ab_glyph = { version = "0.2", optional = true }
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ratatui    = "0.29"
+crossterm  = "0.28"
+winit      = { version = "0.30", optional = true }
+softbuffer = { version = "0.4",  optional = true }
+tiny-skia  = { version = "0.11", optional = true }
+font8x8    = { version = "0.3",  optional = true }
+ab_glyph   = { version = "0.2",  optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen             = "0.2"
+console_error_panic_hook = "0.1"
+getrandom  = { version = "0.2", features = ["js"] }
+web-sys    = { version = "0.3", features = [
+  "Window",
+  "Storage",
+  "Document",
+  "Element",
+  "HtmlCanvasElement",
+  "CanvasRenderingContext2d",
+  "ImageData",
+] }
+tiny-skia  = "0.11"
+font8x8    = "0.3"
+ab_glyph   = "0.2"
 
 [profile.release]
-opt-level = 3
-lto = true
+opt-level     = 3
+lto           = true
 codegen-units = 1
-strip = true
+strip         = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

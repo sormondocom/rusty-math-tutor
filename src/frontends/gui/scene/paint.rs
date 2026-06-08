@@ -17,6 +17,12 @@ use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PremultipliedColorU8, Rect, S
 
 /// Supersample factor: render this many device pixels per logical pixel, then
 /// downscale for anti-aliasing.  Must match the divisor in [`crate::gui`].
+///
+/// SS=3 on all targets — the anti-aliasing is visible in shapes and geometry
+/// figures, and font8x8 glyphs look noticeably crisper with 3×3 averaging
+/// than with 2×2.  For WASM transitions, the cost is amortised by capturing
+/// both card frames *once* at SS resolution and blending at output (1×)
+/// resolution for all subsequent ticks via `blend_output` in the web frontend.
 pub const SS: u32 = 3;
 pub const SSF: f32 = SS as f32;
 
