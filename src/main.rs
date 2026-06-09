@@ -45,6 +45,8 @@ mod student;
 mod topic;
 #[path = "core/units.rs"]
 mod units;
+#[path = "core/time_display.rs"]
+mod time_display;
 
 // --- terminal frontend: the cell renderer + its transition visuals ---
 #[path = "frontends/terminal/canvas.rs"]
@@ -86,10 +88,68 @@ use storage::Storage;
 /// Target frame interval — fast enough for smooth transitions, idle-cheap.
 const TICK: Duration = Duration::from_millis(33);
 
+/// Detect the system's UTC offset in minutes (positive = east / ahead of UTC).
+/// Uses platform APIs directly so no extra crate is needed.
+fn local_offset_mins() -> i32 {
+    #[cfg(windows)]
+    {
+        // GetTimeZoneInformation is a single atomic read — no race condition
+        // between two separate clock calls.  Bias is minutes WEST of UTC;
+        // we negate to get our east-positive convention.
+        // result: 0=unknown, 1=standard time, 2=daylight saving time.
+        #[repr(C)]
+        struct SysTime { year: u16, month: u16, dow: u16, day: u16,
+                         hour: u16, min: u16, sec: u16, ms: u16 }
+        #[repr(C)]
+        struct TzInfo {
+            bias:          i32,
+            std_name:      [u16; 32],
+            std_date:      SysTime,
+            std_bias:      i32,
+            dst_name:      [u16; 32],
+            dst_date:      SysTime,
+            dst_bias:      i32,
+        }
+        extern "system" { fn GetTimeZoneInformation(p: *mut TzInfo) -> u32; }
+        unsafe {
+            let mut tz: TzInfo = std::mem::zeroed();
+            let result = GetTimeZoneInformation(&mut tz);
+            // During DST (result == 2) the effective offset = Bias + DaylightBias.
+            // During standard time (result == 1) it's Bias + StandardBias (usually 0).
+            let extra = if result == 2 { tz.dst_bias } else { tz.std_bias };
+            -(tz.bias + extra)
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        // localtime_r fills tm_gmtoff: seconds east of UTC (including DST).
+        #[repr(C)]
+        struct Tm {
+            sec: i32, min: i32, hour: i32, mday: i32, mon: i32,
+            year: i32, wday: i32, yday: i32, isdst: i32,
+            gmtoff: i64,
+            _zone: *const u8,
+        }
+        extern "C" { fn localtime_r(timep: *const i64, result: *mut Tm) -> *mut Tm; }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let mut tm: Tm = unsafe { std::mem::zeroed() };
+        unsafe { localtime_r(&now, &mut tm); }
+        (tm.gmtoff / 60) as i32
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    { 0 }
+}
+
 fn main() -> Result<()> {
     let storage: Box<dyn Storage> = Box::new(FileStorage);
     let config = Config::load(storage.as_ref());
     let mut app = App::new(config, storage);
+    app.time_local_offset = local_offset_mins();
 
     // Always default to the console, whatever was last persisted — the CPU-graphics
     // window opens only when the user picks it in the picker.  `--gui` skips the

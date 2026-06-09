@@ -187,6 +187,18 @@ pub fn fill_path(pm: &mut Pixmap, path: &tiny_skia::Path, color: Rgb) {
     pm.fill_path(path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
 }
 
+pub fn circle_fill(pm: &mut Pixmap, cx: f32, cy: f32, r: f32, color: Rgb) {
+    if let Some(path) = PathBuilder::from_circle(cx * SSF, cy * SSF, r * SSF) {
+        fill_path(pm, &path, color);
+    }
+}
+
+pub fn circle_stroke(pm: &mut Pixmap, cx: f32, cy: f32, r: f32, color: Rgb, width: f32) {
+    if let Some(path) = PathBuilder::from_circle(cx * SSF, cy * SSF, r * SSF) {
+        stroke_path(pm, &path, color, width);
+    }
+}
+
 pub fn wavy_line(pm: &mut Pixmap, x0: f32, x1: f32, y: f32, amp: f32, color: Rgb, width: f32) {
     use std::f32::consts::TAU;
     let steps = (((x1 - x0) / 8.0) as i32).max(2);

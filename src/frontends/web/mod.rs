@@ -62,6 +62,12 @@ impl WasmApp {
         let config  = Config::load(store.as_ref());
         let mut app = App::new(config, store);
         app.screen  = Screen::Menu; // skip the "pick graphics mode" picker
+
+        // Detect the browser's local timezone offset.
+        // JS Date.getTimezoneOffset() returns minutes WEST of UTC (positive = behind).
+        // We negate so our convention is minutes EAST (positive = ahead of UTC).
+        app.time_local_offset =
+            -(js_sys::Date::new_0().get_timezone_offset() as i32);
         WasmApp { app, canvas: None, ctx2d: None, last_hash: 0, last_size: (0, 0), transition_frames: None }
     }
 
@@ -222,6 +228,7 @@ impl WasmApp {
             Screen::Challenge    => "Challenge",
             Screen::ChallengeEnd => "ChallengeEnd",
             Screen::Experiment   => "Experiment",
+            Screen::Time         => "Time",
         }
         .to_string()
     }
@@ -316,6 +323,17 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.exp_to.hash(&mut s);
             app.exp_field.hash(&mut s);
             app.anim_frame.hash(&mut s); // duck reaction animates
+        }
+        Screen::Time => {
+            std::mem::discriminant(&app.config.hour_format).hash(&mut s);
+            app.time_auto.hash(&mut s);
+            app.time_year.hash(&mut s);
+            app.time_month.hash(&mut s);
+            app.time_day.hash(&mut s);
+            app.time_hour.hash(&mut s);
+            app.time_min.hash(&mut s);
+            app.time_sec.hash(&mut s);
+            app.time_field.hash(&mut s);
         }
     }
 

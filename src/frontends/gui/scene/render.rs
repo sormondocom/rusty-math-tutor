@@ -43,6 +43,7 @@ fn draw_screen(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
         Screen::Teacher                      => draw_teacher(pm, app, wf, hf),
         Screen::Cinematic                    => draw_cinematic(pm, app, wf, hf),
         Screen::Experiment                   => draw_experiment(pm, app, wf, hf),
+        Screen::Time                         => draw_time(pm, app, wf, hf),
     }
 }
 

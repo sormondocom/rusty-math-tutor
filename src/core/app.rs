@@ -22,8 +22,7 @@ use crate::transition::TransitionPhase;
 const CHALLENGE_LEN: Duration = Duration::from_secs(60);
 /// Maximum digits a student can type for an answer.
 const MAX_INPUT: usize = 7;
-/// Number of selectable rows on the menu.
-const MENU_ITEMS: usize = 16;
+// MENU_ITEMS is defined with the MI_ constants below.
 /// Ticks per shape region while a fraction shape materialises.
 const FRAC_MAT_PER_REGION: u32 = 6;
 /// Editable fields on the Experimentation explorer.
@@ -45,6 +44,7 @@ pub enum Screen {
     Challenge,
     ChallengeEnd,
     Experiment,
+    Time,
 }
 
 /// How long each milestone-cinematic scene lingers before transitioning.
@@ -65,20 +65,22 @@ pub struct Cinematic {
     pub transition: Option<TransitionPhase>,
 }
 
-// Menu row indices.
-const MI_STUDENT: usize = 0;
-const MI_GRADE: usize = 1;
-const MI_OPS: std::ops::RangeInclusive<usize> = 2..=5;
-const MI_UNITS: usize = 6;
+// Menu row indices.  Order: section toggles → action rows → admin rows.
+const MI_STUDENT:  usize = 0;
+const MI_GRADE:    usize = 1;
+const MI_OPS:      std::ops::RangeInclusive<usize> = 2..=5;
+const MI_UNITS:    usize = 6;
 const MI_FRACTIONS: usize = 7;
 const MI_PERCENTS: usize = 8;
 const MI_GEOMETRY: usize = 9;
-const MI_SETTINGS: usize = 10;
-const MI_PROGRESS: usize = 11;
-const MI_TEACHER: usize = 12;
-const MI_PRACTICE: usize = 13;
-const MI_CHALLENGE: usize = 14;
-const MI_EXPERIMENT: usize = 15;
+const MI_PRACTICE:  usize = 10;
+const MI_CHALLENGE: usize = 11;
+const MI_TIME:      usize = 12;
+const MI_EXPERIMENT: usize = 13;
+const MI_SETTINGS:  usize = 14;
+const MI_PROGRESS:  usize = 15;
+const MI_TEACHER:   usize = 16;
+const MENU_ITEMS:   usize = 17;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Feedback {
@@ -263,6 +265,21 @@ pub struct App {
     pub exp_to: usize,
     pub exp_field: usize,
 
+    // Time Explorer — interactive time/date display (clocks, Roman, zones, calendar).
+    pub time_year:  u16,
+    pub time_month: u8,
+    pub time_day:   u8,
+    pub time_hour:  u8,
+    pub time_min:   u8,
+    pub time_sec:   u8,
+    /// Which field ↑/↓ adjusts: 0=hour 1=min 2=day 3=month 4=year.
+    pub time_field: u8,
+    /// When true the display tracks real local time; user edits switch it false.
+    pub time_auto:  bool,
+    /// UTC offset of the "home" timezone in minutes (e.g. -300 = UTC-5).
+    /// Set by the frontend at startup from the OS/browser clock.
+    pub time_local_offset: i32,
+
     /// Ticks the current shape (fraction / percent) has been materialising.
     pub frac_anim: u32,
     /// Ticks since the current problem became current — drives the blackboard
@@ -382,6 +399,9 @@ impl App {
             exp_from: 6,
             exp_to: 0,
             exp_field: 0,
+            time_year: 2026, time_month: 1, time_day: 1,
+            time_hour: 12, time_min: 0, time_sec: 0,
+            time_field: 0, time_auto: false, time_local_offset: 0,
             frac_anim: 0,
             card_anim: CARD_DRAW_TICKS,
             input: String::new(),
@@ -467,6 +487,12 @@ impl App {
 
     pub fn on_tick(&mut self) {
         self.anim_frame = self.anim_frame.wrapping_add(1);
+
+        // Live clock: when the Time Explorer is open in auto mode, pull the
+        // current UTC instant on every tick so the seconds hand advances.
+        if self.screen == Screen::Time && self.time_auto {
+            self.sync_time_from_now();
+        }
 
         // Ease the duck in or out.
         let target = if self.help_active { 1.0 } else { 0.0 };
@@ -624,6 +650,7 @@ impl App {
             Screen::Practice | Screen::Challenge => self.on_session_key(key),
             Screen::ChallengeEnd => self.on_challenge_end_key(key),
             Screen::Experiment => self.on_experiment_key(key),
+            Screen::Time       => self.on_time_key(key),
         }
     }
 
@@ -708,8 +735,9 @@ impl App {
                 MI_FRACTIONS => self.menu_fractions = !self.menu_fractions,
                 MI_PERCENTS => self.menu_percents = !self.menu_percents,
                 MI_GEOMETRY => self.menu_geometry = !self.menu_geometry,
-                MI_PRACTICE => self.start_session(false),
+                MI_PRACTICE  => self.start_session(false),
                 MI_CHALLENGE => self.start_session(true),
+                MI_TIME      => self.open_time(),
                 MI_EXPERIMENT => self.screen = Screen::Experiment,
                 _ => {}
             },
@@ -1332,6 +1360,81 @@ impl App {
         self.revealed = false;
         self.reprimand = None;
         self.reprimand_index = 0;
+    }
+
+    // -- Time Explorer -------------------------------------------------------
+
+    pub fn open_time(&mut self) {
+        self.screen = Screen::Time;
+        self.time_auto = true;
+        self.time_field = 0;
+        self.sync_time_from_now();
+    }
+
+    /// Seed the time explorer from the current UTC clock.
+    /// UTC is stored as-is; each zone (including "My Time") applies its own
+    /// offset at render time so zone math is simply UTC + offset_mins.
+    pub fn sync_time_from_now(&mut self) {
+        let (y, mo, d, h, mi, s) = crate::time_display::now_components();
+        self.time_year  = y;
+        self.time_month = mo;
+        self.time_day   = d;
+        self.time_hour  = h;
+        self.time_min   = mi;
+        self.time_sec   = s;
+    }
+
+    fn on_time_key(&mut self, key: Key) {
+        use crate::time_display::days_in_month;
+        const FIELDS: u8 = 5; // hour, min, day, month, year
+        match key {
+            Key::Esc   => self.enter_menu(),
+            // N → reset to live clock mode.
+            Key::Char('n') | Key::Char('N') => {
+                self.time_auto = true;
+                self.sync_time_from_now();
+            }
+            // T → toggle 12-hour / 24-hour display.
+            Key::Char('t') | Key::Char('T') => {
+                self.config.hour_format = self.config.hour_format.toggled();
+                self.save_config();
+            }
+            Key::Left  => self.time_field = self.time_field.checked_sub(1).unwrap_or(FIELDS - 1),
+            Key::Right => self.time_field = (self.time_field + 1) % FIELDS,
+            Key::Up => {
+                self.time_auto = false; // any edit freezes the clock
+                match self.time_field {
+                    0 => self.time_hour  = (self.time_hour + 1) % 24,
+                    1 => self.time_min   = (self.time_min  + 1) % 60,
+                    2 => {
+                        let max = days_in_month(self.time_year, self.time_month);
+                        self.time_day = if self.time_day >= max { 1 } else { self.time_day + 1 };
+                    }
+                    3 => {
+                        self.time_month = if self.time_month >= 12 { 1 } else { self.time_month + 1 };
+                        self.time_day = self.time_day.min(days_in_month(self.time_year, self.time_month));
+                    }
+                    _ => self.time_year = self.time_year.saturating_add(1).min(2099),
+                }
+            }
+            Key::Down => {
+                self.time_auto = false;
+                match self.time_field {
+                    0 => self.time_hour  = self.time_hour.checked_sub(1).unwrap_or(23),
+                    1 => self.time_min   = self.time_min.checked_sub(1).unwrap_or(59),
+                    2 => {
+                        let max = days_in_month(self.time_year, self.time_month);
+                        self.time_day = if self.time_day <= 1 { max } else { self.time_day - 1 };
+                    }
+                    3 => {
+                        self.time_month = if self.time_month <= 1 { 12 } else { self.time_month - 1 };
+                        self.time_day = self.time_day.min(days_in_month(self.time_year, self.time_month));
+                    }
+                    _ => self.time_year = self.time_year.saturating_sub(1).max(1970),
+                }
+            }
+            _ => {}
+        }
     }
 
     // -- Experimentation (free-form unit explorer) --------------------------

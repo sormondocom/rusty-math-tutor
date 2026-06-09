@@ -82,6 +82,24 @@ impl Theme {
     }
 }
 
+/// Whether times are displayed in 12-hour (AM/PM) or 24-hour format.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HourFormat {
+    #[default]
+    Twelve,
+    TwentyFour,
+}
+
+impl HourFormat {
+    pub fn is_24h(self) -> bool { matches!(self, HourFormat::TwentyFour) }
+    pub fn toggled(self) -> Self {
+        match self { HourFormat::Twelve => HourFormat::TwentyFour, HourFormat::TwentyFour => HourFormat::Twelve }
+    }
+    pub fn label(self) -> &'static str {
+        match self { HourFormat::Twelve => "12-hour", HourFormat::TwentyFour => "24-hour" }
+    }
+}
+
 /// How a problem is presented on the card.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Layout {
@@ -149,6 +167,9 @@ pub struct Config {
     /// Visual theme for the CPU-graphics window.
     #[serde(default)]
     pub theme: Theme,
+    /// Whether times are shown in 12-hour AM/PM or 24-hour format.
+    #[serde(default)]
+    pub hour_format: HourFormat,
 }
 
 impl Default for Config {
@@ -174,6 +195,7 @@ impl Default for Config {
             teacher: None,
             locality: crate::units::Locality::UnitedStates,
             theme: Theme::Default,
+            hour_format: HourFormat::Twelve,
         }
     }
 }

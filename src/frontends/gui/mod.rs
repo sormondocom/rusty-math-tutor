@@ -290,6 +290,17 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.exp_to.hash(&mut s);
             app.exp_field.hash(&mut s);
         }
+        Screen::Time => {
+            std::mem::discriminant(&app.config.hour_format).hash(&mut s);
+            app.time_auto.hash(&mut s);
+            app.time_year.hash(&mut s);
+            app.time_month.hash(&mut s);
+            app.time_day.hash(&mut s);
+            app.time_hour.hash(&mut s);
+            app.time_min.hash(&mut s);
+            app.time_sec.hash(&mut s);  // drives re-render every second in auto mode
+            app.time_field.hash(&mut s);
+        }
     }
 
     s.finish()

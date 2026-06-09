@@ -166,12 +166,13 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
     v.push(MenuRow::Check(app.menu_fractions, "Fractions".to_string()));
     v.push(MenuRow::Check(app.menu_percents, "Percentages".to_string()));
     v.push(MenuRow::Check(app.menu_geometry, "Geometry".to_string()));
+    v.push(MenuRow::Text(">  Start Practice".to_string()));
+    v.push(MenuRow::Text(format!(">  Start Challenge  ({}s)", app.roster.current().challenge_secs)));
+    v.push(MenuRow::Text(">  Time Explorer".to_string()));
+    v.push(MenuRow::Text(">  Experimentation".to_string()));
     v.push(MenuRow::Text("Settings...".to_string()));
     v.push(MenuRow::Text("My Progress...".to_string()));
     v.push(MenuRow::Text("Teacher Area...".to_string()));
-    v.push(MenuRow::Text(">  Start Practice".to_string()));
-    v.push(MenuRow::Text(format!(">  Start Challenge  ({}s)", app.roster.current().challenge_secs)));
-    v.push(MenuRow::Text(">  Experimentation".to_string()));
     v
 }
 
@@ -797,4 +798,473 @@ pub fn draw_challenge_end(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     // Footer
     text_centered(pm, cx, hf - 44.0, 1.5,
         "R / Enter: play again    M / Esc: menu", GRAY);
+}
+
+// -- Time Explorer ----------------------------------------------------------
+
+pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    use crate::time_display as td;
+    use std::f32::consts::TAU;
+
+    let h  = app.time_hour;
+    let m  = app.time_min;
+    let s  = app.time_sec;
+    let yr = app.time_year;
+    let mo = app.time_month;
+    let dy = app.time_day;
+    let cxc = wf / 2.0;
+
+    // ── Prominent local time display (top of screen) ───────────────────────
+    // Convert stored UTC → local so kids see their own wall-clock time first.
+    let use_24h = app.config.hour_format.is_24h();
+    let (lyr, lmo, ldy, lh_loc, lm_loc, _) =
+        td::apply_offset_dated(yr, mo, dy, h, m, app.time_local_offset);
+    let (l12, lam) = td::to_12h(lh_loc);
+    // HH:MM — large, centred hero text.
+    let main_part = if use_24h {
+        format!("{:02}:{:02}", lh_loc, lm_loc)
+    } else {
+        format!("{}:{:02}", l12, lm_loc)
+    };
+    // Seconds and AM/PM — rendered at a smaller scale to the right.
+    let sec_part  = format!(":{:02}", s);
+    let ampm_part = if use_24h { String::new() }
+                    else { format!(" {}", if lam { "AM" } else { "PM" }) };
+    let big_date = format!("{}, {} {} {}",
+        td::weekday_name(td::first_dow(lyr, lmo)),
+        td::month_name(lmo), ldy, lyr);
+
+    // Composite render: two scales, vertically centred on the same baseline zone.
+    // Main scale 4.5 → 36 px tall.  Secondary scale 2.6 → 20.8 px tall.
+    let sc_main = 4.5_f32;
+    let sc_sec  = 2.6_f32;
+    let main_h  = sc_main * PX_PER_SCALE;
+    let sec_h   = sc_sec  * PX_PER_SCALE;
+    let top_y   = 12.0_f32;
+
+    let w_main = text_width(&main_part, sc_main);
+    let w_sec  = text_width(&sec_part,  sc_sec);
+    let w_ampm = text_width(&ampm_part, sc_sec);
+    let total_big_w = w_main + w_sec + w_ampm;
+    let x0 = cxc - total_big_w / 2.0;
+
+    // Main HH:MM — sits at top_y
+    text(pm, x0, top_y, sc_main, &main_part, WHITE);
+    // Seconds — vertically centred beside main
+    let sec_y = top_y + (main_h - sec_h) / 2.0;
+    text(pm, x0 + w_main,          sec_y, sc_sec, &sec_part,  [180, 180, 180]);
+    text(pm, x0 + w_main + w_sec,  sec_y, sc_sec, &ampm_part, [140, 140, 140]);
+
+    // Date: leave an 8 px gap below the big time.
+    text_centered(pm, cxc, top_y + main_h + 8.0, 1.8, &big_date, GRAY);
+    // Compact hint line below date.
+    // date bottom = top_y + main_h + 8 + 1.8*8 = 12 + 36 + 8 + 14.4 = 70.4
+    let hint_y = top_y + main_h + 8.0 + 1.8 * PX_PER_SCALE + 8.0; // ≈ 78
+    text_centered(pm, cxc, hint_y, 1.1,
+        "TIME EXPLORER  ·  T: 12/24h  ·  N: now  ·  Esc: menu",
+        if app.time_auto { ACCENT } else { GRAY });
+
+    // ── UTC reference row (editable — secondary display) ───────────────────
+    let field_col = |f: u8| if app.time_field == f { YELLOW } else { WHITE };
+    let is_f = |f: u8| app.time_field == f;
+
+    let input_y = hint_y + 1.1 * PX_PER_SCALE + 8.0; // 10 px gap after hint
+    let sc = 1.5; // deliberately compact — this is not the hero number
+
+    // Build the date string pieces for the UTC reference row.
+    let (h12, am) = td::to_12h(h);
+    let hh_s  = if use_24h { format!("{:02}", h) } else { format!("{}", h12) };
+    let ampm_s = if use_24h { String::new() } else { if am { " AM".into() } else { " PM".into() } };
+    let mm_s  = format!("{:02}", m);
+    let ss_s  = format!("{:02}", s);
+    let dy_s  = format!("{:02}", dy);
+    let mo_s  = td::month_abbr(mo).to_string();
+    let yr_s  = format!("{}", yr);
+    let sep   = "  ";
+
+    let w_hh   = text_width(&hh_s, sc);
+    let w_col  = text_width(":", sc);
+    let w_mm   = text_width(&mm_s, sc);
+    let w_ss   = text_width(&ss_s, sc);
+    let w_ampm = text_width(&ampm_s, sc * 0.7);
+    let w_dy   = text_width(&dy_s, sc);
+    let w_mo   = text_width(&mo_s, sc);
+    let w_yr   = text_width(&yr_s, sc);
+    let w_sep  = text_width(sep, sc);
+    let total  = w_hh + w_col + w_mm + w_col + w_ss + w_ampm + w_sep + w_dy + w_sep + w_mo + w_sep + w_yr;
+    let mut cx = cxc - total / 2.0;
+
+    text(pm, cx, input_y, sc, &hh_s, field_col(0)); cx += w_hh;
+    text(pm, cx, input_y, sc, ":", GRAY);             cx += w_col;
+    text(pm, cx, input_y, sc, &mm_s, field_col(1));  cx += w_mm;
+    text(pm, cx, input_y, sc, ":", GRAY);             cx += w_col;
+    let ss_col = if app.time_auto { [160, 160, 160] } else { GRAY };
+    text(pm, cx, input_y + sc * PX_PER_SCALE * 0.18, sc * 0.7, &ss_s, ss_col); cx += w_ss;
+    // AM/PM badge (not editable — changes automatically with the hour)
+    if !ampm_s.is_empty() {
+        text(pm, cx, input_y + sc * PX_PER_SCALE * 0.18, sc * 0.7,
+             &ampm_s, if app.time_field == 0 { YELLOW } else { GRAY });
+    }
+    cx += w_ampm + w_sep;
+    text(pm, cx, input_y, sc, &dy_s, field_col(2)); cx += w_dy + w_sep;
+    text(pm, cx, input_y, sc, &mo_s, field_col(3)); cx += w_mo + w_sep;
+    text(pm, cx, input_y, sc, &yr_s, field_col(4));
+
+    // Field labels
+    let lsc = 1.1;
+    let label_y = input_y + sc * PX_PER_SCALE + 3.0;
+    {
+        // Position labels under each editable field
+        let mut px = cxc - total / 2.0;
+        let pairs: &[(&str, f32, u8)] = &[
+            ("HOUR",  w_hh,                          0),
+            ("MIN",   w_mm + w_col + w_ss + w_sep,   1), // skip :ss
+            ("DAY",   w_dy + w_sep,                  2),
+            ("MONTH", w_mo + w_sep,                  3),
+            ("YEAR",  w_yr,                          4),
+        ];
+        for (label, fw, fi) in pairs {
+            text_centered(pm, px + fw / 2.0, label_y, lsc, label,
+                if is_f(*fi) { YELLOW } else { GRAY });
+            px += fw + if *fi == 0 { w_col } else { 0.0 };
+        }
+    }
+    // One-line hint: field labels already show which is which; keep it short.
+    text_centered(pm, cxc, label_y + lsc * PX_PER_SCALE + 4.0, 1.0,
+        "UTC reference  ·  ↑ ↓ change  ·  ← → switch field", GRAY);
+
+    // ── Clocks (analog pair + nixie digital) ──────────────────────────────
+    let clock_top      = label_y + lsc * PX_PER_SCALE + 18.0;
+    let bottom_strip_h = (hf * 0.19).max(120.0).min(150.0);
+    let total_clock_h  = hf - clock_top - bottom_strip_h;
+
+    // Reserve the bottom 22 % of the clock band (min 65 px) for the nixie clock.
+    let nixie_h    = (total_clock_h * 0.22).max(65.0).min(90.0);
+    let nixie_gap  = 10.0_f32;
+    let analog_h   = total_clock_h - nixie_h - nixie_gap;
+
+    let r        = (analog_h / 2.1).min(wf * 0.155).max(36.0);
+    let clock_cy = clock_top + analog_h * 0.50;
+    // Nixie clock vertically centred in its reserved strip.
+    let nixie_cy = clock_top + analog_h + nixie_gap + nixie_h * 0.50;
+
+    // Clock positions: Roman (left) | Arabic (centre) | Word panel (right)
+    let cx_roman  = wf * 0.18;
+    let cx_arabic = wf * 0.50;
+    let word_x    = wf * 0.68;
+    let word_w    = wf * 0.30;
+
+    // Helper closure: draw one analog clock (including second hand)
+    let mut draw_clock = |pm: &mut Pixmap, ccx: f32, labels: &[&str], label_scale_q: f32, label_scale_n: f32| {
+        circle_fill(pm, ccx, clock_cy, r, CARD_BG);
+        circle_stroke(pm, ccx, clock_cy, r, WHITE, 2.0);
+        // 60 minute-tick marks — must be wide enough to survive chalk_mul().
+        // [80,80,96] is bright enough for chalk themes; 1.5 width at SS=3 → visible.
+        for i in 0..60usize {
+            if i % 5 == 0 { continue; } // hour positions handled with dedicated ticks
+            let angle = (i as f32 * 6.0 - 90.0) * TAU / 360.0;
+            let outer = r * 0.94;
+            let inner = r * 0.90;
+            line(pm, ccx + outer * angle.cos(), clock_cy + outer * angle.sin(),
+                     ccx + inner * angle.cos(), clock_cy + inner * angle.sin(),
+                 [80, 80, 96], 1.5);
+        }
+        // 12 hour tick marks and labels
+        for i in 0..12usize {
+            let angle = (i as f32 * 30.0 - 90.0) * TAU / 360.0;
+            let is_q  = i % 3 == 0;
+            let outer = r * 0.94;
+            let inner = if is_q { r * 0.80 } else { r * 0.88 };
+            line(pm, ccx + outer * angle.cos(), clock_cy + outer * angle.sin(),
+                     ccx + inner * angle.cos(), clock_cy + inner * angle.sin(),
+                 if is_q { WHITE } else { GRAY }, if is_q { 2.5 } else { 1.2 });
+            let ls  = if is_q { label_scale_q } else { label_scale_n };
+            let lr  = r * (if is_q { 0.62 } else { 0.66 });
+            let lx  = ccx + lr * angle.cos();
+            let ly  = clock_cy + lr * angle.sin() - ls * PX_PER_SCALE * 0.5;
+            text_centered(pm, lx, ly, ls, labels[i], if is_q { YELLOW } else { GRAY });
+        }
+        // Hands use LOCAL time so the clock face matches the big display above.
+        let ha = ((lh_loc % 12) as f32 + lm_loc as f32 / 60.0 + s as f32 / 3600.0) * 30.0 - 90.0;
+        let ha = ha * TAU / 360.0;
+        line(pm, ccx, clock_cy, ccx + r*0.50*ha.cos(), clock_cy + r*0.50*ha.sin(), WHITE, 4.5);
+        let ma = (lm_loc as f32 + s as f32 / 60.0) * 6.0 - 90.0;
+        let ma = ma * TAU / 360.0;
+        line(pm, ccx, clock_cy, ccx + r*0.76*ma.cos(), clock_cy + r*0.76*ma.sin(), ACCENT, 2.8);
+        // Second hand — thin red, sweeps smoothly
+        let sa = (s as f32 * 6.0 - 90.0) * TAU / 360.0;
+        line(pm, ccx, clock_cy, ccx + r*0.88*sa.cos(), clock_cy + r*0.88*sa.sin(), RED, 1.2);
+        // Counter-weight tail
+        line(pm, ccx, clock_cy, ccx - r*0.20*sa.cos(), clock_cy - r*0.20*sa.sin(), RED, 1.2);
+        // Centre
+        circle_fill(pm, ccx, clock_cy, 5.0, WHITE);
+        circle_fill(pm, ccx, clock_cy, 2.5, RED);
+    };
+
+    // Roman numeral clock — larger quarter labels, smaller non-quarter
+    draw_clock(pm, cx_roman,  td::CLOCK_LABELS_ROMAN,  2.0, 1.3);
+    // Arabic numeral clock
+    draw_clock(pm, cx_arabic, td::CLOCK_LABELS_ARABIC, 1.6, 1.2);
+
+    // Clock titles float just above each face — not at the top of the screen.
+    let title_y = clock_cy - r - 14.0;
+    text_centered(pm, cx_roman,  title_y, 1.2, "Roman numerals", GRAY);
+    text_centered(pm, cx_arabic, title_y, 1.2, "Standard clock", GRAY);
+
+    // ── Word clock panel ───────────────────────────────────────────────────
+    // Spans from just below clock_top to the bottom of the nixie strip.
+    let wp_y   = clock_top + 14.0;
+    let wp_h   = total_clock_h - 18.0; // reach from analog top to nixie bottom
+    fill(pm, word_x, wp_y, word_w, wp_h, CARD_BG);
+    stroke_rect(pm, word_x, wp_y, word_w, wp_h, 1.5, [44, 48, 64]);
+    text_centered(pm, word_x + word_w / 2.0, wp_y + 12.0, 1.3, "HOW WE SAY IT", CYAN);
+
+    let wx = word_x + 14.0;
+    let mut wy = wp_y + 36.0;
+    let row_h = 28.0;
+    let wrap_w = word_w - 28.0;
+
+    let entries: &[(&str, String, [u8; 3])] = &[
+        ("British:",  td::fmt_british(h, m),         WHITE),
+        ("American:", td::fmt_american(h, m),         WHITE),
+        ("Military:", td::fmt_military_spoken(h, m),  WHITE),
+        ("24-hour:",  td::fmt_24h(h, m),              CYAN),
+        ("12-hour:",  td::fmt_12h(h, m),              CYAN),
+        ("Roman:",    td::fmt_roman(h, m),             YELLOW),
+    ];
+    for (label, value, col) in entries {
+        text(pm, wx, wy, 1.2, label, GRAY);
+        // Wrap value if needed
+        for (li, line_str) in wrap_words(value, wrap_w, 1.5).iter().enumerate() {
+            text(pm, wx, wy + (li as f32 + 1.0) * 18.0, 1.5, line_str, *col);
+        }
+        wy += row_h + 6.0;
+    }
+
+    // ── Nixie tube digital clock ───────────────────────────────────────────
+    // Spans the area beneath the two analog clocks (left 2/3 of screen).
+    let nixie_x  = (cx_roman  - r * 0.90).max(4.0);
+    let nixie_x2 = (cx_arabic + r * 0.90).min(word_x - 8.0);
+    draw_nixie_clock(pm, (nixie_x + nixie_x2) / 2.0, nixie_cy,
+                     nixie_x2 - nixie_x, nixie_h,
+                     lh_loc, lm_loc, s, use_24h);
+
+    // ── Bottom strip: time zones (left) + calendar (right) ─────────────────
+    let strip_y = hf - bottom_strip_h + 4.0;
+    let cal_w   = 180.0;
+    let tz_area_w = wf - cal_w - 16.0;
+
+    // The stored h/m/d is UTC.  Each zone's time = UTC + zone.offset_mins.
+    // "My Time" uses time_local_offset (detected from OS/browser, DST-aware).
+    let zones   = td::ZONES;
+    let loc_off = app.time_local_offset;
+    let tz_sc   = 1.1;
+
+    struct ZoneEntry<'a> { city: &'a str, abbr: &'a str, eff: i32 }
+    let mut entries: Vec<ZoneEntry> = vec![
+        ZoneEntry { city: "My Time", abbr: "local", eff: loc_off },
+    ];
+    for z in zones {
+        entries.push(ZoneEntry { city: z.city, abbr: z.abbr, eff: z.offset_on(yr, mo, dy) });
+    }
+
+    // Ceiling division → always exactly 2 rows regardless of entry count.
+    let n_entries = entries.len();
+    let half      = (n_entries + 1) / 2;
+    let tz_col_w  = tz_area_w / half as f32;
+    // Zone row height: time (13px) + optional date (11px) + city (10px) = max ~37px.
+    let tz_row_h  = (bottom_strip_h * 0.45).max(36.0).min(48.0);
+
+    for (i, z) in entries.iter().enumerate() {
+        let (zy2, zmo2, zd2, zh2, zm2, delta) =
+            td::apply_offset_dated(yr, mo, dy, h, m, z.eff);
+        let row = (i / half) as f32;
+        let col = (i % half) as f32;
+        let zx  = col * tz_col_w + tz_col_w / 2.0;
+        let zy  = strip_y + row * tz_row_h;
+
+        let day_tag = if delta == 0 { String::new() }
+                      else { format!("{:+}", delta) };
+        let time_str = td::fmt_time(zh2, zm2, use_24h);
+        let date_str = if delta != 0 {
+            format!("{} {} {} {}", zd2, td::month_abbr(zmo2), zy2, day_tag)
+        } else { String::new() };
+
+        let is_local = i == 0;
+        text_centered(pm, zx, zy, tz_sc, &time_str,
+            if is_local { YELLOW } else if delta == 0 { WHITE } else { ACCENT });
+        if !date_str.is_empty() {
+            text_centered(pm, zx, zy + 14.0, 1.0, &date_str, ACCENT);
+        }
+        let city_y = zy + if delta != 0 { 26.0 } else { 16.0 };
+        let city_label = if is_local {
+            format!("{} ({})", z.city, z.abbr)
+        } else {
+            format!("{}", z.city)
+        };
+        text_centered(pm, zx, city_y, 1.0, &city_label,
+            if is_local { YELLOW } else { GRAY });
+    }
+
+    // Calendar
+    let cal_x  = wf - cal_w - 8.0;
+    let cal_y  = strip_y;
+    fill(pm, cal_x, cal_y, cal_w, bottom_strip_h - 8.0, CARD_BG);
+    stroke_rect(pm, cal_x, cal_y, cal_w, bottom_strip_h - 8.0, 1.2, [44, 48, 64]);
+
+    let cal_header = format!("{} {}", td::month_name(mo), yr);
+    text_centered(pm, cal_x + cal_w / 2.0, cal_y + 5.0, 1.2, &cal_header, CYAN);
+
+    // Weekday row
+    let cell_w = cal_w / 7.0;
+    let dow_abbrs = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+    for (i, d_abbr) in dow_abbrs.iter().enumerate() {
+        text_centered(pm, cal_x + (i as f32 + 0.5) * cell_w, cal_y + 20.0, 1.0, d_abbr, GRAY);
+    }
+
+    // Day cells
+    let first_col = td::first_dow(yr, mo) as f32;
+    let days_in   = td::days_in_month(yr, mo) as f32;
+    // cell_h scales to fit 6 rows + header + weekday row + hint inside the strip.
+    let grid_rows = ((first_col as usize + days_in as usize + 6) / 7 + 1).max(5);
+    let grid_avail = bottom_strip_h - 42.0; // header(15) + weekday(13) + hint(14)
+    let cell_h = (grid_avail / grid_rows as f32).max(10.0).min(15.0);
+    let grid_top  = cal_y + 32.0;
+
+    // Collect dates that appear shifted in any zone.
+    let mut shifted_days: Vec<u8> = Vec::new();
+    for z in zones {
+        let (_, zmo2, zd2, _, _, delta) =
+            td::apply_offset_dated(yr, mo, dy, h, m, z.offset_on(yr, mo, dy));
+        if delta != 0 && zmo2 == mo { shifted_days.push(zd2); }
+    }
+
+    for d_num in 1u8..=(days_in as u8) {
+        let idx  = first_col + (d_num - 1) as f32;
+        let col  = (idx as usize) % 7;
+        let row  = (idx as usize) / 7;
+        let dcx  = cal_x + (col as f32 + 0.5) * cell_w;
+        let dcy  = grid_top + row as f32 * cell_h + cell_h * 0.4;
+        let is_today = d_num == dy;
+        let is_shift = shifted_days.contains(&d_num);
+        let color = if is_today { YELLOW }
+                    else if is_shift { ACCENT }
+                    else { GRAY };
+        // Circle is drawn with stroke_path so it stays visible in chalk themes.
+        if is_today {
+            circle_stroke(pm, dcx, dcy, cell_h * 0.52, YELLOW, 1.5);
+        } else if is_shift {
+            circle_stroke(pm, dcx, dcy, cell_h * 0.48, ACCENT, 1.0);
+        }
+        text_centered(pm, dcx, dcy - PX_PER_SCALE * 0.5, 1.0, &d_num.to_string(), color);
+    }
+
+    // Format hint sits at the very bottom of the calendar box.
+    text_centered(pm, cal_x + cal_w / 2.0, cal_y + bottom_strip_h - 12.0, 1.0,
+        "T: 12 ↔ 24 h", GRAY);
+}
+
+// ---------------------------------------------------------------------------
+// Nixie tube digital clock
+// ---------------------------------------------------------------------------
+
+fn draw_nixie_clock(pm: &mut Pixmap, cx: f32, cy: f32, avail_w: f32, avail_h: f32,
+                    hour: u8, min: u8, sec: u8, use_24h: bool) {
+    use crate::time_display::to_12h;
+    use std::f32::consts::TAU;
+
+    let (h12, am) = to_12h(hour);
+
+    // Build digit strings
+    let h_str  = if use_24h { format!("{:02}", hour) } else { h12.to_string() };
+    let m_str  = format!("{:02}", min);
+    let s_str  = format!("{:02}", sec);
+    let ampm   = if use_24h { "" } else { if am { "AM" } else { "PM" } };
+
+    // Nixie tube colour palette
+    const OUTER_BG:  Rgb = [9, 4, 0];
+    const TUBE_BG:   Rgb = [15, 6, 0];
+    const TUBE_EDGE: Rgb = [55, 24, 3];
+    const GLOW_DIM:  Rgb = [80, 28, 2];
+    const AMBER:     Rgb = [238, 98, 12];
+    const AMBER_DIM: Rgb = [160, 60, 7];
+
+    // Scale the digit to fill ~70 % of the available height
+    let digit_sc  = (avail_h / PX_PER_SCALE * 0.68).max(2.5).min(6.0);
+    let tube_h    = avail_h * 0.88;
+    let tube_top  = cy - tube_h / 2.0;
+
+    // Measure a representative digit to size the tubes
+    let char_w    = text_width("0", digit_sc);
+    let tube_w    = char_w * 1.9;   // tubes are wider than their digit
+    let colon_w   = tube_w * 0.45;  // colons get a narrower tube
+    let gap       = tube_w * 0.12;  // inter-tube gap
+    let ampm_sc   = digit_sc * 0.42;
+
+    // Build the ordered segment list: (label_string, tube_width)
+    let mut segs: Vec<(String, f32)> = Vec::new();
+    for c in h_str.chars()  { segs.push((c.to_string(), tube_w)); }
+    segs.push((":".to_string(), colon_w));
+    for c in m_str.chars()  { segs.push((c.to_string(), tube_w)); }
+    segs.push((":".to_string(), colon_w));
+    for c in s_str.chars()  { segs.push((c.to_string(), tube_w)); }
+    if !ampm.is_empty() {
+        segs.push((" ".to_string(), gap));
+        segs.push((ampm.to_string(), text_width(ampm, ampm_sc) * 1.4));
+    }
+
+    // Total width of all tubes + gaps
+    let total_w = segs.iter().map(|(_, w)| w).sum::<f32>()
+                + gap * (segs.len().saturating_sub(1)) as f32;
+
+    // Outer background panel — slightly wider than the tubes
+    let pad = 10.0_f32;
+    fill(pm, cx - total_w / 2.0 - pad, cy - avail_h / 2.0,
+         total_w + pad * 2.0, avail_h, OUTER_BG);
+    stroke_rect(pm, cx - total_w / 2.0 - pad, cy - avail_h / 2.0,
+                total_w + pad * 2.0, avail_h, 1.5, TUBE_EDGE);
+
+    // Draw each tube
+    let text_y    = cy - digit_sc * PX_PER_SCALE / 2.0;
+    let ampm_y    = cy - ampm_sc  * PX_PER_SCALE / 2.0;
+    let mut x     = cx - total_w / 2.0;
+
+    for (i, (label, tw)) in segs.iter().enumerate() {
+        let is_colon = label == ":";
+        let is_ampm  = label == "AM" || label == "PM";
+        let is_space = label == " ";
+
+        if !is_space {
+            // Tube housing
+            fill(pm, x, tube_top, *tw, tube_h, TUBE_BG);
+            stroke_rect(pm, x, tube_top, *tw, tube_h, 0.8, TUBE_EDGE);
+        }
+
+        if is_colon {
+            // Two glowing dots instead of the text colon
+            let ccx = x + tw / 2.0;
+            let dot_r = digit_sc * PX_PER_SCALE * 0.09;
+            let dot_off = digit_sc * PX_PER_SCALE * 0.22;
+            circle_fill(pm, ccx, cy - dot_off, dot_r * 1.8, GLOW_DIM);
+            circle_fill(pm, ccx, cy + dot_off, dot_r * 1.8, GLOW_DIM);
+            circle_fill(pm, ccx, cy - dot_off, dot_r, AMBER);
+            circle_fill(pm, ccx, cy + dot_off, dot_r, AMBER);
+        } else if is_ampm {
+            let tw2 = text_width(label, ampm_sc);
+            let tx = x + (tw - tw2) / 2.0;
+            text(pm, tx, ampm_y, ampm_sc, label, AMBER_DIM);
+        } else if !is_space {
+            // Digit: glow first, then bright core
+            let tw2 = text_width(label, digit_sc);
+            let tx = x + (tw - tw2) / 2.0;
+            // Soft glow halo
+            for off in &[(-1.0_f32, 0.0_f32), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                text(pm, tx + off.0, text_y + off.1, digit_sc, label, GLOW_DIM);
+            }
+            // Bright amber core
+            text(pm, tx, text_y, digit_sc, label, AMBER);
+        }
+
+        x += tw + if i + 1 < segs.len() { gap } else { 0.0 };
+    }
 }

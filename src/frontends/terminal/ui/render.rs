@@ -28,5 +28,6 @@ pub fn draw(f: &mut Frame, app: &App, fx: &Transitions) {
         Screen::Practice | Screen::Challenge => draw_session(f, app, fx, area),
         Screen::ChallengeEnd                 => draw_challenge_end(f, app, area),
         Screen::Experiment                   => draw_experiment(f, app, area),
+        Screen::Time                         => draw_time(f, app, area),
     }
 }

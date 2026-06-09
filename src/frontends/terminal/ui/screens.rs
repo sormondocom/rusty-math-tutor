@@ -80,13 +80,14 @@ pub fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push((format!("{} Fractions", mark(app.menu_fractions)), "(shapes & pieces)"));
     items.push((format!("{} Percentages", mark(app.menu_percents)), "(shapes out of 100)"));
     items.push((format!("{} Geometry", mark(app.menu_geometry)), "(perimeter, area, volume)"));
-    items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
-    items.push(("My Progress...".to_string(), "(Enter to view)"));
-    items.push(("Teacher Area...".to_string(), "(password)"));
     items.push(("▶  Start Practice".to_string(), "(no timer)"));
     let challenge_hint = format!("({}s timer)", app.roster.current().challenge_secs);
     items.push(("▶  Start Challenge".to_string(), challenge_hint.as_str()));
+    items.push(("▶  Time Explorer".to_string(), "(clocks & time zones)"));
     items.push(("▶  Experimentation".to_string(), "(explore unit conversions)"));
+    items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
+    items.push(("My Progress...".to_string(), "(Enter to view)"));
+    items.push(("Teacher Area...".to_string(), "(password)"));
 
     // Scroll the window so the selected item stays visible.
     let (scroll, visible) = scroll_window(items.len(), sel, area.top() + 8, area.bottom().saturating_sub(2));
@@ -670,5 +671,244 @@ pub fn draw_challenge_end(f: &mut Frame, app: &App, area: Rect) {
     // Footer
     put_str(buf, col, area.bottom().saturating_sub(2),
         "R / Enter: play again    M / Esc: menu",
+        Style::default().fg(Color::DarkGray));
+}
+
+// -- Time Explorer ----------------------------------------------------------
+
+pub fn draw_time(f: &mut Frame, app: &App, area: Rect) {
+    use crate::time_display as td;
+
+    let buf = f.buffer_mut();
+    let col = area.left() + 2;
+    let h   = app.time_hour;
+    let m   = app.time_min;
+
+    // ── Prominent local time (top) ─────────────────────────────────────────
+    let use_24h = app.config.hour_format.is_24h();
+    let (_, lmo_l, ldy_l, lh_loc, lm_loc, _) =
+        td::apply_offset_dated(app.time_year, app.time_month, app.time_day,
+                               h, m, app.time_local_offset);
+    let (l12, lam) = td::to_12h(lh_loc);
+    let big_time = if use_24h {
+        format!("{:02}:{:02}", lh_loc, lm_loc)
+    } else {
+        format!("{}:{:02} {}", l12, lm_loc, if lam { "AM" } else { "PM" })
+    };
+    let big_date = format!("{} {} {}",
+        ldy_l, td::month_abbr(lmo_l), app.time_year);
+    let live_tag = if app.time_auto { " (live)" } else { "" };
+    put_str(buf, center(area, big_time.chars().count() as u16), area.top() + 1,
+        &big_time,
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    put_str(buf, center(area, (big_date.len() + live_tag.len()) as u16), area.top() + 2,
+        &format!("{}{}", big_date, live_tag),
+        Style::default().fg(Color::Gray));
+
+    // ── UTC reference row (editable) ───────────────────────────────────────
+    let mm_str = format!("{:02}", m);
+    let (h12, am) = td::to_12h(h);
+    let hh_str = if use_24h { format!("{:02}", h) } else { format!("{}", h12) };
+    let ampm_str = if use_24h { "" } else if am { " AM" } else { " PM" };
+    let ss_str = format!("{:02}", app.time_sec);
+    let dy_str = format!("{:02}", app.time_day);
+    let mo_str = td::month_abbr(app.time_month);
+    let yr_str = format!("{}", app.time_year);
+    // Stored value is always UTC; label it so kids understand the reference.
+    let input_str = format!("  {}:{}:{}{ampm_str} UTC  {} {} {}  ",
+        hh_str, mm_str, ss_str, dy_str, mo_str, yr_str);
+    let iy  = area.top() + 4; // below the big local-time display
+    let ixc = center(area, input_str.chars().count() as u16);
+    put_str(buf, ixc, iy, &input_str, Style::default().fg(Color::White));
+
+    // Overlay the focused field in yellow.
+    // Field byte positions depend on hour-format string length.
+    let hh_len = hh_str.len() as u16;
+    let ampm_len = ampm_str.len() as u16;
+    // input_str layout: "  HH:MM:SS[ampm]  DD Mon YYYY  "
+    // offsets:           0  2 5  8  11   16 19  23
+    let f0_off = 2u16;                           // hour
+    let f1_off = f0_off + hh_len + 1;            // min (skip ':')
+    let f2_off = f1_off + 2 + 1 + 2 + ampm_len + 2; // day (skip mm:ss+ampm+gap)
+    let f3_off = f2_off + 3;                     // month (skip dd+space)
+    let f4_off = f3_off + 4;                     // year (skip Mon+space)
+    let field_offsets = [f0_off, f1_off, f2_off, f3_off, f4_off];
+    let field_lens    = [hh_len, 2u16, 2, 3, 4];
+    let fi = app.time_field as usize;
+    if fi < field_offsets.len() {
+        let start = field_offsets[fi] as usize;
+        let end   = (start + field_lens[fi] as usize).min(input_str.len());
+        put_str(buf, ixc + field_offsets[fi], iy,
+            &input_str[start..end],
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    }
+
+    let auto_hint = if app.time_auto {
+        "LIVE  —  N: stays live   ↑ ↓ to freeze & adjust   ← → field"
+    } else {
+        "FROZEN   ↑ ↓ change   ← → field   N: back to now   Esc: menu"
+    };
+    put_str(buf, center(area, auto_hint.chars().count() as u16), iy + 1, auto_hint,
+        Style::default().fg(if app.time_auto { Color::LightCyan } else { Color::DarkGray }));
+
+    let panel_y = iy + 3;
+
+    // ── Format panel (left) ────────────────────────────────────────────────
+    let formats = [
+        ("12-hour :", td::fmt_12h(h, m)),
+        ("24-hour :", td::fmt_24h(h, m)),
+        ("British :", td::fmt_british(h, m)),
+        ("American:", td::fmt_american(h, m)),
+        ("Roman   :", td::fmt_roman(h, m)),
+    ];
+    for (i, (label, value)) in formats.iter().enumerate() {
+        put_str(buf, col, panel_y + i as u16,
+            label, Style::default().fg(Color::DarkGray));
+        // Highlight the active format
+        let is_active = (i == 0 && !use_24h) || (i == 1 && use_24h);
+        let st = if is_active {
+            Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        put_str(buf, col + 10, panel_y + i as u16, value, st);
+    }
+
+    // T toggle hint under the format panel
+    let toggle_hint = format!("T: switch to {}  N: now  Esc: menu",
+        if use_24h { "12-hour" } else { "24-hour" });
+    put_str(buf, col, panel_y + formats.len() as u16 + 1,
+        &toggle_hint, Style::default().fg(Color::DarkGray));
+
+    // ── ASCII analog clock ─────────────────────────────────────────────────
+    // Position clock at ~col 29, calendar at col 52 (4-char cells, 28 wide).
+    let clock_x: u16 = (area.left() + 28).min(area.right().saturating_sub(23));
+    let cal_x:   u16 = (clock_x + 24).min(area.right().saturating_sub(28));
+
+    let clock_lines = td::ascii_clock(h, m);
+    let clock_row   = panel_y;
+    for (i, line) in clock_lines.iter().enumerate() {
+        for (j, ch) in line.chars().enumerate() {
+            let style = match ch {
+                'H' => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                '*' => Style::default().fg(Color::Cyan),
+                '+' => Style::default().fg(Color::LightYellow),
+                '.' => Style::default().fg(Color::DarkGray),
+                _ if ch.is_ascii_alphanumeric() => Style::default().fg(Color::Yellow),
+                _ => Style::default().fg(Color::DarkGray),
+            };
+            let x = clock_x + j as u16;
+            let y = clock_row + i as u16;
+            if x < area.right() && y < area.bottom() {
+                buf[(x, y)].set_char(ch).set_style(style);
+            }
+        }
+    }
+
+    // ── Calendar (4-char cells → 28 chars wide) ────────────────────────────
+    let yr  = app.time_year;
+    let mo  = app.time_month;
+    let dy  = app.time_day;
+    let loc_off = app.time_local_offset;
+
+    // "Tomorrow" in the current month (wrap to next month → not shown in this grid).
+    let days_in    = td::days_in_month(yr, mo);
+    let tomorrow   = if dy < days_in { dy + 1 } else { 0 }; // 0 = no tomorrow in this month
+
+    // Collect days shifted to a different date in any timezone.
+    let mut shifted_days: Vec<u8> = Vec::new();
+    for z in td::ZONES {
+        let (_, zmo2, zd2, _, _, delta) =
+            td::apply_offset_dated(yr, mo, dy, h, m, z.offset_on(yr, mo, dy));
+        if delta != 0 && zmo2 == mo { shifted_days.push(zd2); }
+    }
+
+    // Header (centred over 28 chars)
+    let cal_header = format!("{} {}", td::month_abbr(mo), yr);
+    put_str(buf, cal_x, clock_row,
+        &format!("{:^28}", cal_header),
+        Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
+
+    // Weekday header — 4 chars each: " Su  Mo  Tu  We  Th  Fr  Sa"
+    put_str(buf, cal_x, clock_row + 1,
+        " Su  Mo  Tu  We  Th  Fr  Sa",
+        Style::default().fg(Color::DarkGray));
+
+    // Day grid — 4 chars per cell.
+    // Today:    "(dd)"   LightYellow + Bold
+    // Tomorrow: "[dd]"   LightCyan
+    // Shifted:  " dd*"   LightMagenta (timezone-shifted date in this month)
+    // Normal:   "  dd"   Gray
+    let first_dow = td::first_dow(yr, mo) as u16; // 0=Sun
+    let mut col_pos = first_dow;
+    let mut row_pos: u16 = 2;
+    for d in 1u8..=days_in {
+        let cx = cal_x + col_pos * 4;
+        let cy = clock_row + row_pos;
+        if cy < area.bottom() {
+            let (label, style) = if d == dy {
+                (format!("({:>2})", d),
+                 Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD))
+            } else if d == tomorrow {
+                (format!("[{:>2}]", d),
+                 Style::default().fg(Color::LightCyan))
+            } else if shifted_days.contains(&d) {
+                (format!(" {:>2}*", d),
+                 Style::default().fg(Color::LightMagenta))
+            } else {
+                (format!("  {:>2}", d),
+                 Style::default().fg(Color::Gray))
+            };
+            put_str(buf, cx, cy, &label, style);
+        }
+        col_pos += 1;
+        if col_pos == 7 { col_pos = 0; row_pos += 1; }
+    }
+
+    // ── Time zones ─────────────────────────────────────────────────────────
+    // The stored h/m/d is UTC.  Each zone: time = UTC + zone.offset_mins.
+    // "My Time" uses time_local_offset which is DST-aware from the OS.
+    struct TzRow<'a> { city: &'a str, abbr: &'a str, eff: i32 }
+    let mut tz_entries: Vec<TzRow> = vec![
+        TzRow { city: "My Time", abbr: "local", eff: loc_off },
+    ];
+    for z in td::ZONES {
+        tz_entries.push(TzRow { city: z.city, abbr: z.abbr, eff: z.offset_on(yr, mo, dy) });
+    }
+
+    let tz_y  = clock_row + clock_lines.len() as u16 + 1;
+    let n_tz  = tz_entries.len();
+    let half  = n_tz / 2;
+    let zone_col_w = ((area.width as usize).saturating_sub(2) / half).max(16) as u16;
+
+    for (i, z) in tz_entries.iter().enumerate() {
+        let (_, zmo2, zd2, zh2, zm2, delta) =
+            td::apply_offset_dated(yr, mo, dy, h, m, z.eff);
+        let row_i = (i / half) as u16;
+        let col_i = (i % half) as u16;
+        let zx    = area.left() + col_i * zone_col_w + 1;
+        let zy    = tz_y + row_i * 2;
+        if zy + 1 >= area.bottom() { break; }
+
+        let time_str = td::fmt_time(zh2, zm2, use_24h);
+        let date_info = if delta != 0 {
+            format!(" {:+}day {}{}", delta, zd2, td::month_abbr(zmo2))
+        } else { String::new() };
+
+        let is_local   = i == 0;
+        let time_color = if is_local { Color::LightYellow }
+                         else if delta == 0 { Color::White }
+                         else { Color::LightMagenta };
+        put_str(buf, zx, zy,
+            &format!("{:<13}{}{}", z.city, time_str, date_info),
+            Style::default().fg(time_color));
+        put_str(buf, zx, zy + 1,
+            &format!("             ({})", z.abbr),
+            Style::default().fg(Color::DarkGray));
+    }
+
+    // Footer
+    put_str(buf, col, area.bottom().saturating_sub(1),
+        "UTC offsets only (no DST)   (dd)=today  [dd]=tomorrow  dd*=tz shift",
         Style::default().fg(Color::DarkGray));
 }

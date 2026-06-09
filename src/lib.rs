@@ -41,7 +41,8 @@
 // main.rs points crate::transition at frontends/terminal/transition.rs
 // (same types + rendering).  lib.rs points here (types only).
 #[path = "core/transition.rs"] mod transition;
-#[path = "core/units.rs"]      mod units;
+#[path = "core/units.rs"]        mod units;
+#[path = "core/time_display.rs"] mod time_display;
 
 // ---------------------------------------------------------------------------
 // GUI scene renderer (WASM only)
