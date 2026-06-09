@@ -861,7 +861,7 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     // date bottom = top_y + main_h + 8 + 1.8*8 = 12 + 36 + 8 + 14.4 = 70.4
     let hint_y = top_y + main_h + 8.0 + 1.8 * PX_PER_SCALE + 8.0; // ≈ 78
     text_centered(pm, cxc, hint_y, 1.1,
-        "TIME EXPLORER  ·  T: 12/24h  ·  N: now  ·  Esc: menu",
+        "TIME EXPLORER  ·  H: help  ·  T: 12/24h  ·  N: now  ·  Esc: menu",
         if app.time_auto { ACCENT } else { GRAY });
 
     // ── UTC reference row (editable — secondary display) ───────────────────
@@ -1162,6 +1162,70 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     // Format hint sits at the very bottom of the calendar box.
     text_centered(pm, cal_x + cal_w / 2.0, cal_y + bottom_strip_h - 12.0, 1.0,
         "T: 12 ↔ 24 h", GRAY);
+
+    // ── Time reference overlay (H key) ─────────────────────────────────────
+    if app.time_help_active {
+        draw_time_help(pm, wf, hf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Time reference facts overlay (H key on the Time Explorer screen)
+// ---------------------------------------------------------------------------
+
+fn draw_time_help(pm: &mut Pixmap, wf: f32, hf: f32) {
+    use crate::time_display::TIME_FACTS;
+
+    // Dark backdrop
+    fill(pm, 0.0, 0.0, wf, hf, [4, 4, 8]);
+
+    // Card
+    let cx = wf / 2.0;
+    let pad = wf * 0.04;
+    let card_x = pad;
+    let card_y = hf * 0.04;
+    let card_w = wf - pad * 2.0;
+    let card_h = hf * 0.92;
+    fill(pm, card_x, card_y, card_w, card_h, [12, 14, 24]);
+    stroke_rect(pm, card_x, card_y, card_w, card_h, 2.0, CYAN);
+
+    // Header
+    text_centered(pm, cx, card_y + 10.0, 2.0, "TIME  REFERENCE", CYAN);
+    text_centered(pm, cx, card_y + 30.0, 1.1, "H or Esc to close", GRAY);
+
+    // Two-column layout for the five categories
+    let col_w   = card_w / 2.0 - 12.0;
+    let col1_x  = card_x + 12.0;
+    let col2_x  = card_x + card_w / 2.0 + 4.0;
+    let start_y = card_y + 48.0;
+
+    // Left column: categories 0–2,  right column: 3–4
+    let left_cats  = &TIME_FACTS[..3];
+    let right_cats = &TIME_FACTS[3..];
+
+    for (col_x, cats) in [(col1_x, left_cats), (col2_x, right_cats)] {
+        let mut y = start_y;
+        for (cat_title, facts) in cats.iter() {
+            // Category heading
+            text(pm, col_x, y, 1.5, cat_title, YELLOW);
+            y += 1.5 * PX_PER_SCALE + 4.0;
+
+            // Rule line under heading
+            line(pm, col_x, y, col_x + col_w, y, [40, 44, 60], 1.0);
+            y += 5.0;
+
+            // Facts
+            for fact in facts.iter() {
+                text(pm, col_x + 8.0, y, 1.3, fact, WHITE);
+                y += 1.3 * PX_PER_SCALE + 6.0;
+            }
+            y += 14.0; // gap between categories
+        }
+    }
+
+    // Footer
+    text_centered(pm, cx, card_y + card_h - 14.0, 1.1,
+        "H or Esc to close", GRAY);
 }
 
 // ---------------------------------------------------------------------------

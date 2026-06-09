@@ -276,6 +276,8 @@ pub struct App {
     pub time_field: u8,
     /// When true the display tracks real local time; user edits switch it false.
     pub time_auto:  bool,
+    /// Reference-facts overlay (toggled with H).
+    pub time_help_active: bool,
     /// UTC offset of the "home" timezone in minutes (e.g. -300 = UTC-5).
     /// Set by the frontend at startup from the OS/browser clock.
     pub time_local_offset: i32,
@@ -401,7 +403,7 @@ impl App {
             exp_field: 0,
             time_year: 2026, time_month: 1, time_day: 1,
             time_hour: 12, time_min: 0, time_sec: 0,
-            time_field: 0, time_auto: false, time_local_offset: 0,
+            time_field: 0, time_auto: false, time_help_active: false, time_local_offset: 0,
             frac_anim: 0,
             card_anim: CARD_DRAW_TICKS,
             input: String::new(),
@@ -1388,7 +1390,13 @@ impl App {
         use crate::time_display::days_in_month;
         const FIELDS: u8 = 5; // hour, min, day, month, year
         match key {
-            Key::Esc   => self.enter_menu(),
+            // Esc: close help overlay first; only exit to menu if overlay is already closed.
+            Key::Esc => {
+                if self.time_help_active { self.time_help_active = false; }
+                else { self.enter_menu(); }
+            }
+            // H → toggle reference-facts overlay.
+            Key::Char('h') | Key::Char('H') => self.time_help_active = !self.time_help_active,
             // N → reset to live clock mode.
             Key::Char('n') | Key::Char('N') => {
                 self.time_auto = true;

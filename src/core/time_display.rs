@@ -360,6 +360,54 @@ pub fn fmt_military_spoken(hour: u8, min: u8) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Time reference facts (K-8 curriculum)
+// ---------------------------------------------------------------------------
+
+/// Each entry is (category_title, &[fact_lines]).
+pub const TIME_FACTS: &[(&str, &[&str])] = &[
+    ("Seconds, Minutes & Hours", &[
+        "60 seconds  =  1 minute",
+        "60 minutes  =  1 hour",
+        "3,600 seconds  =  1 hour",
+        "hours → minutes:  × 60",
+        "minutes → seconds:  × 60",
+        "hours → seconds:  × 3,600",
+    ]),
+    ("Hours & Days", &[
+        "24 hours  =  1 day",
+        "12 hours  =  half a day",
+        "AM = before noon  (12:00 AM – 11:59 AM)",
+        "PM = after noon   (12:00 PM – 11:59 PM)",
+        "12:00 AM  =  midnight",
+        "12:00 PM  =  noon",
+    ]),
+    ("Days, Weeks & Years", &[
+        "7 days  =  1 week",
+        "28–31 days  =  1 month",
+        "4 weeks  ≈  1 month",
+        "52 weeks  =  1 year",
+        "12 months  =  1 year",
+        "365 days  =  1 year  (366 in a leap year)",
+    ]),
+    ("Reading a Clock", &[
+        "o'clock  =  exactly on the hour",
+        "quarter past  =  15 minutes after",
+        "half past  =  30 minutes after",
+        "quarter to  =  15 minutes before",
+        "Example:  quarter to 3  =  2:45",
+        "Example:  half past 7  =  7:30",
+    ]),
+    ("Time Zones & UTC", &[
+        "Earth is divided into 24 time zones",
+        "Moving east  →  add hours",
+        "Moving west  →  subtract hours",
+        "UTC = the world's time reference",
+        "Zulu (Z) = UTC — used by pilots & military",
+        "DST shifts clocks ±1 hour (spring forward, fall back)",
+    ]),
+];
+
+// ---------------------------------------------------------------------------
 // Roman numerals — ASCII analog clock  (23 chars × 11 rows)
 // ---------------------------------------------------------------------------
 

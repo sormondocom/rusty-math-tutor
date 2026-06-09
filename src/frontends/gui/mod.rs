@@ -292,6 +292,7 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
         }
         Screen::Time => {
             std::mem::discriminant(&app.config.hour_format).hash(&mut s);
+            app.time_help_active.hash(&mut s);
             app.time_auto.hash(&mut s);
             app.time_year.hash(&mut s);
             app.time_month.hash(&mut s);

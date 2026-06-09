@@ -909,6 +909,89 @@ pub fn draw_time(f: &mut Frame, app: &App, area: Rect) {
 
     // Footer
     put_str(buf, col, area.bottom().saturating_sub(1),
-        "UTC offsets only (no DST)   (dd)=today  [dd]=tomorrow  dd*=tz shift",
+        "UTC offsets only (no DST)   (dd)=today  [dd]=tomorrow  dd*=tz shift  H=help",
+        Style::default().fg(Color::DarkGray));
+
+    // ── Time reference overlay (H key) ─────────────────────────────────────
+    if app.time_help_active {
+        draw_time_help_overlay(buf, area);
+    }
+}
+
+fn draw_time_help_overlay(buf: &mut ratatui::buffer::Buffer, area: Rect) {
+    use crate::time_display::TIME_FACTS;
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Clear, Widget};
+
+    // Clear background for the overlay
+    let overlay = Rect {
+        x:      area.x + 2,
+        y:      area.y + 1,
+        width:  area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+    Clear.render(overlay, buf);
+
+    let bx = overlay.x;
+    let by = overlay.y;
+    let bw = overlay.width;
+    let bh = overlay.height;
+
+    // Draw border manually
+    for x in bx..bx+bw {
+        buf[(x, by)]          .set_char('═').set_style(Style::default().fg(Color::Cyan));
+        buf[(x, by+bh-1)]     .set_char('═').set_style(Style::default().fg(Color::Cyan));
+    }
+    for y in by..by+bh {
+        buf[(bx, y)]          .set_char('║').set_style(Style::default().fg(Color::Cyan));
+        buf[(bx+bw-1, y)]     .set_char('║').set_style(Style::default().fg(Color::Cyan));
+    }
+    buf[(bx, by)]             .set_char('╔').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx+bw-1, by)]        .set_char('╗').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx, by+bh-1)]        .set_char('╚').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx+bw-1, by+bh-1)]   .set_char('╝').set_style(Style::default().fg(Color::Cyan));
+
+    // Title
+    let title = "  TIME REFERENCE  ";
+    let tx = bx + (bw / 2).saturating_sub(title.len() as u16 / 2);
+    put_str(buf, tx, by, title,
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    // Two-column layout
+    let inner_x  = bx + 2;
+    let inner_y  = by + 2;
+    let half_w   = (bw / 2).saturating_sub(2);
+    let col2_x   = bx + bw / 2 + 1;
+
+    let left_cats  = &TIME_FACTS[..3];
+    let right_cats = &TIME_FACTS[3..];
+
+    for (col_x, cats) in [(inner_x, left_cats), (col2_x, right_cats)] {
+        let mut y = inner_y;
+        for (cat_title, facts) in cats.iter() {
+            if y + 1 >= by + bh { break; }
+            put_str(buf, col_x, y, cat_title,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+            y += 1;
+            // Rule line
+            for x in col_x..col_x+half_w {
+                if x < bx + bw - 1 {
+                    buf[(x, y)].set_char('─').set_style(Style::default().fg(Color::DarkGray));
+                }
+            }
+            y += 1;
+            for fact in facts.iter() {
+                if y >= by + bh - 1 { break; }
+                put_str(buf, col_x + 1, y, fact, Style::default().fg(Color::White));
+                y += 1;
+            }
+            y += 1;
+        }
+    }
+
+    // Footer
+    let footer = " H or Esc: close ";
+    let fx = bx + (bw / 2).saturating_sub(footer.len() as u16 / 2);
+    put_str(buf, fx, by + bh - 1, footer,
         Style::default().fg(Color::DarkGray));
 }
