@@ -95,9 +95,6 @@ impl HourFormat {
     pub fn toggled(self) -> Self {
         match self { HourFormat::Twelve => HourFormat::TwentyFour, HourFormat::TwentyFour => HourFormat::Twelve }
     }
-    pub fn label(self) -> &'static str {
-        match self { HourFormat::Twelve => "12-hour", HourFormat::TwentyFour => "24-hour" }
-    }
 }
 
 /// How a problem is presented on the card.

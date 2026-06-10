@@ -1,4 +1,7 @@
 //! WASM library root — the entry point for the browser frontend.
+// All core domain symbols are used by the binary target, not by lib itself.
+// The lib crate exists purely as the WASM entry point; suppress dead-code noise.
+#![allow(dead_code)]
 //!
 //! `wasm-pack build --target web` compiles this file as the library crate
 //! root.  The native binary uses `main.rs` as its root instead; both roots

@@ -956,7 +956,7 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     let word_w    = wf * 0.30;
 
     // Helper closure: draw one analog clock (including second hand)
-    let mut draw_clock = |pm: &mut Pixmap, ccx: f32, labels: &[&str], label_scale_q: f32, label_scale_n: f32| {
+    let draw_clock = |pm: &mut Pixmap, ccx: f32, labels: &[&str], label_scale_q: f32, label_scale_n: f32| {
         circle_fill(pm, ccx, clock_cy, r, CARD_BG);
         circle_stroke(pm, ccx, clock_cy, r, WHITE, 2.0);
         // 60 minute-tick marks — must be wide enough to survive chalk_mul().
@@ -1292,10 +1292,9 @@ fn draw_time_help(pm: &mut Pixmap, wf: f32, hf: f32) {
 // Nixie tube digital clock
 // ---------------------------------------------------------------------------
 
-fn draw_nixie_clock(pm: &mut Pixmap, cx: f32, cy: f32, avail_w: f32, avail_h: f32,
+fn draw_nixie_clock(pm: &mut Pixmap, cx: f32, cy: f32, _avail_w: f32, avail_h: f32,
                     hour: u8, min: u8, sec: u8, use_24h: bool) {
     use crate::time_display::to_12h;
-    use std::f32::consts::TAU;
 
     let (h12, am) = to_12h(hour);
 

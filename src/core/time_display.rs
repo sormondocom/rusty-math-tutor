@@ -160,13 +160,6 @@ pub const ZONES: &[Zone] = &[
     Zone { city: "Auckland",    abbr: "NZST",   offset_mins:  720, dst_rule: DstKind::None    },
 ];
 
-/// Apply a UTC offset to (hour, minute) only; wraps through midnight.
-pub fn apply_offset(hour: u8, min: u8, offset_mins: i32) -> (u8, u8) {
-    let total = hour as i32 * 60 + min as i32 + offset_mins;
-    let total = total.rem_euclid(24 * 60);
-    ((total / 60) as u8, (total % 60) as u8)
-}
-
 /// Apply a UTC offset with full date tracking.
 /// Returns `(year, month, day, hour, minute, day_delta)` where
 /// `day_delta` is -1 / 0 / +1 indicating whether the date rolled back/forward.
@@ -233,11 +226,6 @@ pub fn month_abbr(month: u8) -> &'static str {
 
 pub fn weekday_name(dow: u8) -> &'static str {
     const DAYS: &[&str] = &["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-    DAYS.get(dow as usize).copied().unwrap_or("?")
-}
-
-pub fn weekday_abbr(dow: u8) -> &'static str {
-    const DAYS: &[&str] = &["Su","Mo","Tu","We","Th","Fr","Sa"];
     DAYS.get(dow as usize).copied().unwrap_or("?")
 }
 
@@ -522,43 +510,3 @@ fn draw_hand(grid: &mut Vec<Vec<char>>, cx: f32, cy: f32,
 
 // ---------------------------------------------------------------------------
 // Calendar rendering (terminal)
-// ---------------------------------------------------------------------------
-
-/// Returns lines for a text-mode month calendar.
-/// `highlight_day` is the entered date's day (highlighted differently).
-/// `offset_days` is a set of day numbers that appear shifted from another
-/// timezone (shown with a marker).
-pub fn calendar_lines(year: u16, month: u8, highlight_day: u8) -> Vec<String> {
-    let header = format!(" {} {} ", month_abbr(month), year);
-    let dow_row = " Su Mo Tu We Th Fr Sa";
-    let dow_first = first_dow(year, month) as usize; // 0=Sun
-    let days = days_in_month(year, month);
-
-    let mut lines = vec![header, dow_row.to_string()];
-
-    let mut col = dow_first;
-    let mut buf = "  ".repeat(col);
-    for d in 1u8..=days {
-        let cell = if d == highlight_day {
-            format!("[{:2}]", d) // 4 chars but needs special handling
-        } else {
-            format!("{:3}", d)
-        };
-        // Simple 3-char cells
-        if d == highlight_day {
-            buf.push_str(&format!("{:>2}*", d));
-        } else {
-            buf.push_str(&format!("{:>3}", d));
-        }
-        col += 1;
-        if col == 7 {
-            lines.push(buf.clone());
-            buf.clear();
-            col = 0;
-        }
-    }
-    if !buf.is_empty() {
-        lines.push(buf);
-    }
-    lines
-}

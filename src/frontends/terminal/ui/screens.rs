@@ -922,7 +922,7 @@ pub fn draw_time(f: &mut Frame, app: &App, area: Rect) {
 fn draw_time_help_overlay(buf: &mut ratatui::buffer::Buffer, area: Rect) {
     use crate::time_display::TIME_FACTS;
     use ratatui::style::{Color, Modifier, Style};
-    use ratatui::widgets::{Block, Borders, Clear, Widget};
+    use ratatui::widgets::{Clear, Widget};
 
     // Clear background for the overlay
     let overlay = Rect {
