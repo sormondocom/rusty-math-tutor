@@ -290,6 +290,7 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.exp_to.hash(&mut s);
             app.exp_field.hash(&mut s);
         }
+        Screen::Help => {} // static content — frame hash is stable
         Screen::Time => {
             std::mem::discriminant(&app.config.hour_format).hash(&mut s);
             app.time_help_active.hash(&mut s);

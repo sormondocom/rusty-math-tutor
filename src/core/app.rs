@@ -45,6 +45,7 @@ pub enum Screen {
     ChallengeEnd,
     Experiment,
     Time,
+    Help,
 }
 
 /// How long each milestone-cinematic scene lingers before transitioning.
@@ -80,7 +81,8 @@ const MI_EXPERIMENT: usize = 13;
 const MI_SETTINGS:  usize = 14;
 const MI_PROGRESS:  usize = 15;
 const MI_TEACHER:   usize = 16;
-const MENU_ITEMS:   usize = 17;
+const MI_HELP:      usize = 17;
+const MENU_ITEMS:   usize = 18;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Feedback {
@@ -653,6 +655,10 @@ impl App {
             Screen::ChallengeEnd => self.on_challenge_end_key(key),
             Screen::Experiment => self.on_experiment_key(key),
             Screen::Time       => self.on_time_key(key),
+            Screen::Help       => match key {
+                Key::Esc | Key::Enter | Key::Char('h') | Key::Char('H') => self.enter_menu(),
+                _ => {}
+            },
         }
     }
 
@@ -728,7 +734,8 @@ impl App {
                 }
                 MI_SETTINGS => self.open_settings(),
                 MI_PROGRESS => self.screen = Screen::Stats,
-                MI_TEACHER => self.open_teacher(),
+                MI_TEACHER  => self.open_teacher(),
+                MI_HELP     => self.screen = Screen::Help,
                 MI_STUDENT => {
                     self.naming = true;
                     self.name_input.clear();

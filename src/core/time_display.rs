@@ -360,6 +360,57 @@ pub fn fmt_military_spoken(hour: u8, min: u8) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Keyboard shortcut reference — shared by GUI, terminal, and WASM renderers.
+// Each entry: (screen_title, &[(key, description)])
+// ---------------------------------------------------------------------------
+
+pub const HOTKEYS: &[(&str, &[(&str, &str)])] = &[
+    ("Menu", &[
+        ("↑ / ↓",     "Move the cursor"),
+        ("Enter / →",  "Select item or toggle checkbox"),
+        ("← ",         "Un-check a checkbox"),
+        ("H",          "This help screen"),
+    ]),
+    ("Practice & Challenge", &[
+        ("0 – 9",      "Type digits of your answer"),
+        ("−",          "Toggle negative sign"),
+        ("Backspace",  "Delete the last digit"),
+        ("Enter",      "Submit your answer"),
+        ("H",          "Show strategy hint (Deduction Duck)"),
+        ("Y",          "Why am I learning this?"),
+        ("Esc",        "Return to menu"),
+    ]),
+    ("Challenge Results", &[
+        ("R / Enter",  "Play the challenge again"),
+        ("M / Esc",    "Return to menu"),
+    ]),
+    ("Time Explorer", &[
+        ("↑ / ↓",      "Change the selected field"),
+        ("← / →",      "Switch between fields"),
+        ("N",           "Jump to current time (live mode)"),
+        ("T",           "Toggle 12-hour / 24-hour display"),
+        ("H",           "Time reference facts (conversions & rules)"),
+        ("Esc",         "Return to menu"),
+    ]),
+    ("Settings", &[
+        ("↑ / ↓",      "Move between grade levels"),
+        ("← / →",      "Adjust number range for that grade"),
+        ("Esc",         "Return to menu"),
+    ]),
+    ("Experimentation", &[
+        ("↑ / ↓",      "Switch the active field"),
+        ("← / →",      "Change category or unit"),
+        ("0 – 9 / .",   "Type an amount"),
+        ("Backspace",   "Delete last digit"),
+        ("Esc",         "Return to menu"),
+    ]),
+    ("General", &[
+        ("Esc",         "Always returns to the previous screen"),
+        ("H",           "Context-sensitive help on most screens"),
+    ]),
+];
+
+// ---------------------------------------------------------------------------
 // Time reference facts (K-8 curriculum)
 // ---------------------------------------------------------------------------
 

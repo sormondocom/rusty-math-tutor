@@ -88,6 +88,7 @@ pub fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
     items.push(("My Progress...".to_string(), "(Enter to view)"));
     items.push(("Teacher Area...".to_string(), "(password)"));
+    items.push(("Help / Key Guide...".to_string(), "(H on any screen)"));
 
     // Scroll the window so the selected item stays visible.
     let (scroll, visible) = scroll_window(items.len(), sel, area.top() + 8, area.bottom().saturating_sub(2));
@@ -991,6 +992,93 @@ fn draw_time_help_overlay(buf: &mut ratatui::buffer::Buffer, area: Rect) {
 
     // Footer
     let footer = " H or Esc: close ";
+    let fx = bx + (bw / 2).saturating_sub(footer.len() as u16 / 2);
+    put_str(buf, fx, by + bh - 1, footer,
+        Style::default().fg(Color::DarkGray));
+}
+
+// -- Help / keyboard-shortcut screen ----------------------------------------
+
+pub fn draw_help(f: &mut Frame, area: Rect) {
+    use crate::time_display::HOTKEYS;
+
+    let buf = f.buffer_mut();
+    let bx  = area.x;
+    let by  = area.y;
+    let bw  = area.width;
+    let bh  = area.height;
+
+    // Background + border
+    for y in by..by + bh {
+        for x in bx..bx + bw {
+            buf[(x, y)].set_char(' ').set_style(Style::default().bg(Color::Black));
+        }
+    }
+    for x in bx..bx + bw {
+        buf[(x, by)]      .set_char('═').set_style(Style::default().fg(Color::Cyan));
+        buf[(x, by+bh-1)] .set_char('═').set_style(Style::default().fg(Color::Cyan));
+    }
+    for y in by..by + bh {
+        buf[(bx, y)]       .set_char('║').set_style(Style::default().fg(Color::Cyan));
+        buf[(bx+bw-1, y)]  .set_char('║').set_style(Style::default().fg(Color::Cyan));
+    }
+    buf[(bx, by)]           .set_char('╔').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx+bw-1, by)]      .set_char('╗').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx, by+bh-1)]      .set_char('╚').set_style(Style::default().fg(Color::Cyan));
+    buf[(bx+bw-1, by+bh-1)] .set_char('╝').set_style(Style::default().fg(Color::Cyan));
+
+    let title = "  KEYBOARD SHORTCUTS  ";
+    let tx = bx + (bw / 2).saturating_sub(title.len() as u16 / 2);
+    put_str(buf, tx, by, title,
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    // Two columns
+    let inner_y  = by + 2;
+    let half_w   = (bw / 2).saturating_sub(2);
+    let col1_x   = bx + 2;
+    let col2_x   = bx + bw / 2 + 1;
+    let n        = HOTKEYS.len();
+    let left_n   = (n + 1) / 2;
+
+    let key_col_w = 14u16; // fixed width for the key column
+
+    for (col_idx, range) in [(0usize, 0..left_n), (1, left_n..n)] {
+        let col_x = if col_idx == 0 { col1_x } else { col2_x };
+        let mut y = inner_y;
+
+        for sec_idx in range {
+            let (title, keys) = &HOTKEYS[sec_idx];
+            if y >= by + bh - 1 { break; }
+
+            // Section heading
+            put_str(buf, col_x, y, title,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+            y += 1;
+
+            // Rule
+            for x in col_x..col_x + half_w.min(bw / 2 - 1) {
+                buf[(x, y)].set_char('─').set_style(Style::default().fg(Color::DarkGray));
+            }
+            y += 1;
+
+            // Key / description rows
+            for (key, desc) in keys.iter() {
+                if y >= by + bh - 1 { break; }
+                put_str(buf, col_x + 1, y,
+                    &format!("{:<width$}", key, width = key_col_w as usize),
+                    Style::default().fg(Color::LightCyan));
+                let desc_x = col_x + 1 + key_col_w;
+                if desc_x < bx + bw - 1 {
+                    put_str(buf, desc_x, y, desc, Style::default().fg(Color::White));
+                }
+                y += 1;
+            }
+            y += 1; // gap
+        }
+    }
+
+    // Footer
+    let footer = " Esc · Enter · H: close ";
     let fx = bx + (bw / 2).saturating_sub(footer.len() as u16 / 2);
     put_str(buf, fx, by + bh - 1, footer,
         Style::default().fg(Color::DarkGray));

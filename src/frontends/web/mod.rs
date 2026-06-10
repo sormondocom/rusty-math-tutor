@@ -229,6 +229,7 @@ impl WasmApp {
             Screen::ChallengeEnd => "ChallengeEnd",
             Screen::Experiment   => "Experiment",
             Screen::Time         => "Time",
+            Screen::Help         => "Help",
         }
         .to_string()
     }
@@ -324,6 +325,7 @@ fn visual_hash(app: &App, w: u32, h: u32) -> u64 {
             app.exp_field.hash(&mut s);
             app.anim_frame.hash(&mut s); // duck reaction animates
         }
+        Screen::Help => {}
         Screen::Time => {
             std::mem::discriminant(&app.config.hour_format).hash(&mut s);
             app.time_help_active.hash(&mut s);

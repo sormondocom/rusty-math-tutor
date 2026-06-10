@@ -173,6 +173,7 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
     v.push(MenuRow::Text("Settings...".to_string()));
     v.push(MenuRow::Text("My Progress...".to_string()));
     v.push(MenuRow::Text("Teacher Area...".to_string()));
+    v.push(MenuRow::Text("Help / Key Guide...".to_string()));
     v
 }
 
@@ -1169,6 +1170,63 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     if app.time_help_active {
         draw_time_help(pm, wf, hf);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard-shortcut help screen (accessible from the main menu)
+// ---------------------------------------------------------------------------
+
+pub fn draw_key_guide(pm: &mut Pixmap, wf: f32, hf: f32) {
+    use crate::time_display::HOTKEYS;
+
+    let cx = wf / 2.0;
+    fill(pm, 0.0, 0.0, wf, hf, [6, 6, 12]);
+
+    // Card
+    let pad   = wf * 0.04;
+    let crd_x = pad;
+    let crd_y = hf * 0.04;
+    let crd_w = wf - pad * 2.0;
+    let crd_h = hf * 0.92;
+    fill(pm, crd_x, crd_y, crd_w, crd_h, [12, 14, 24]);
+    stroke_rect(pm, crd_x, crd_y, crd_w, crd_h, 2.0, CYAN);
+
+    text_centered(pm, cx, crd_y + 10.0, 2.2, "KEYBOARD  SHORTCUTS", CYAN);
+    text_centered(pm, cx, crd_y + 30.0, 1.1, "Esc, Enter, or H to close", GRAY);
+
+    // Two-column layout
+    let n_sections = HOTKEYS.len();
+    let left_n  = (n_sections + 1) / 2;           // ceiling half
+    let col_w   = crd_w / 2.0 - 16.0;
+    let col1_x  = crd_x + 12.0;
+    let col2_x  = crd_x + crd_w / 2.0 + 4.0;
+    let start_y = crd_y + 50.0;
+
+    for (col_idx, range) in [(0, 0..left_n), (1, left_n..n_sections)] {
+        let col_x = if col_idx == 0 { col1_x } else { col2_x };
+        let mut y = start_y;
+
+        for sec_idx in range {
+            let (title, keys) = &HOTKEYS[sec_idx];
+
+            // Section heading
+            text(pm, col_x, y, 1.5, title, YELLOW);
+            y += 1.5 * PX_PER_SCALE + 3.0;
+            line(pm, col_x, y, col_x + col_w, y, [40, 44, 60], 1.0);
+            y += 5.0;
+
+            // Key rows
+            for (key, desc) in keys.iter() {
+                let kw = text_width(key, 1.3);
+                text(pm, col_x + 4.0,        y, 1.3, key,  ACCENT);
+                text(pm, col_x + kw + 14.0,  y, 1.3, desc, WHITE);
+                y += 1.3 * PX_PER_SCALE + 5.0;
+            }
+            y += 12.0; // gap between sections
+        }
+    }
+
+    text_centered(pm, cx, crd_y + crd_h - 14.0, 1.1, "Esc · Enter · H  to close", GRAY);
 }
 
 // ---------------------------------------------------------------------------
