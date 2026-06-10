@@ -979,7 +979,9 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
                      ccx + inner * angle.cos(), clock_cy + inner * angle.sin(),
                  if is_q { WHITE } else { GRAY }, if is_q { 2.5 } else { 1.2 });
             let ls  = if is_q { label_scale_q } else { label_scale_n };
-            let lr  = r * (if is_q { 0.62 } else { 0.66 });
+            // Pull labels slightly inward to keep clearance from the tick ring
+            // as font size grows.
+            let lr  = r * (if is_q { 0.57 } else { 0.63 });
             let lx  = ccx + lr * angle.cos();
             let ly  = clock_cy + lr * angle.sin() - ls * PX_PER_SCALE * 0.5;
             text_centered(pm, lx, ly, ls, labels[i], if is_q { YELLOW } else { GRAY });
@@ -1002,9 +1004,9 @@ pub fn draw_time(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
     };
 
     // Roman numeral clock — larger quarter labels, smaller non-quarter
-    draw_clock(pm, cx_roman,  td::CLOCK_LABELS_ROMAN,  2.0, 1.3);
+    draw_clock(pm, cx_roman,  td::CLOCK_LABELS_ROMAN,  2.6, 1.7);
     // Arabic numeral clock
-    draw_clock(pm, cx_arabic, td::CLOCK_LABELS_ARABIC, 1.6, 1.2);
+    draw_clock(pm, cx_arabic, td::CLOCK_LABELS_ARABIC, 2.1, 1.6);
 
     // Clock titles float just above each face — not at the top of the screen.
     let title_y = clock_cy - r - 14.0;
