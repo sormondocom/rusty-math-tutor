@@ -166,9 +166,11 @@ fn menu_rows(app: &App) -> Vec<MenuRow> {
     v.push(MenuRow::Check(app.menu_fractions, "Fractions".to_string()));
     v.push(MenuRow::Check(app.menu_percents, "Percentages".to_string()));
     v.push(MenuRow::Check(app.menu_geometry, "Geometry".to_string()));
+    v.push(MenuRow::Check(app.menu_graphing, "Graphing".to_string()));
     v.push(MenuRow::Text(">  Start Practice".to_string()));
     v.push(MenuRow::Text(format!(">  Start Challenge  ({}s)", app.roster.current().challenge_secs)));
     v.push(MenuRow::Text(">  Time Explorer".to_string()));
+    v.push(MenuRow::Text(">  Graph Explorer".to_string()));
     v.push(MenuRow::Text(">  Experimentation".to_string()));
     v.push(MenuRow::Text("Settings...".to_string()));
     v.push(MenuRow::Text("My Progress...".to_string()));
@@ -1390,4 +1392,324 @@ fn draw_nixie_clock(pm: &mut Pixmap, cx: f32, cy: f32, _avail_w: f32, avail_h: f
 
         x += tw + if i + 1 < segs.len() { gap } else { 0.0 };
     }
+}
+
+// -- Graph figure renderer ---------------------------------------------------
+
+/// Per-category colour palette — distinct enough in default mode, all become
+/// chalk-white variants under `themed()` in chalk mode.
+const GRAPH_PALETTE: [Rgb; 6] = [
+    [120, 200, 230],  // cyan-blue
+    [240, 210,  90],  // amber
+    [180, 110, 220],  // purple
+    [110, 210, 140],  // green
+    [230, 100, 100],  // salmon-red
+    [240, 155,  60],  // orange
+];
+
+/// Fill a circular wedge sector with straight-line arc approximation.
+fn fill_sector(pm: &mut Pixmap, cx: f32, cy: f32, r: f32, start: f32, end: f32, color: Rgb) {
+    let span  = (end - start).abs();
+    let steps = ((span * r).max(4.0) as usize).min(80);
+    let mut pb = tiny_skia::PathBuilder::new();
+    pb.move_to(cx * SSF, cy * SSF);
+    for s in 0..=steps {
+        let a = start + (end - start) * s as f32 / steps as f32;
+        pb.line_to((cx + r * a.cos()) * SSF, (cy + r * a.sin()) * SSF);
+    }
+    pb.close();
+    if let Some(path) = pb.finish() {
+        fill_path(pm, &path, color);
+    }
+}
+
+/// Draw a filled 5-pointed star centred at (cx, cy) with the given outer radius.
+fn draw_star(pm: &mut Pixmap, cx: f32, cy: f32, outer_r: f32, color: Rgb) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let inner_r = outer_r * 0.40;
+    let pts: Vec<(f32, f32)> = (0..10)
+        .map(|i| {
+            let a = PI * i as f32 / 5.0 - FRAC_PI_2;
+            let r = if i % 2 == 0 { outer_r } else { inner_r };
+            (cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect();
+    if let Some(path) = poly(&pts) {
+        fill_path(pm, &path, color);
+    }
+}
+
+/// Draw a graph figure (bar/pictograph/line/pie/coordinate) into `band` = (x,y,w,h).
+pub fn draw_graph_figure(pm: &mut Pixmap, band: (f32, f32, f32, f32), kind: &crate::graphing::GraphKind, data: &crate::graphing::GraphData) {
+    use crate::graphing::GraphKind;
+    use std::f32::consts::{FRAC_PI_2, TAU};
+
+    let (bx, by, bw, bh) = band;
+    if bw < 10.0 || bh < 10.0 { return; }
+
+    let n = data.values.len();
+    if n == 0 { return; }
+    let max_v = data.values.iter().copied().max().unwrap_or(1).max(1) as f32;
+
+    match kind {
+        GraphKind::Pictograph { scale } => {
+            let row_h = (bh / n as f32).min(28.0);
+            let sym_r  = (row_h * 0.34).max(4.0).min(10.0);
+            for (i, (cat, &val)) in data.categories.iter().zip(data.values.iter()).enumerate() {
+                let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                let ry = by + (i as f32 + 0.5) * row_h;
+                let label = format!("{:>7}:", cat);
+                text(pm, bx, ry - sym_r, 1.2, &label, GRAY);
+                let n_sym = (val / (*scale as i32).max(1)).max(0) as usize;
+                for j in 0..n_sym.min(20) {
+                    draw_star(pm, bx + 90.0 + j as f32 * (sym_r * 2.6), ry, sym_r, color);
+                }
+            }
+        }
+
+        GraphKind::Pie => {
+            let total = data.values.iter().sum::<i32>().max(1) as f32;
+
+            // Circle: centred in the left ~55% of the band.
+            let r  = (bh.min(bw * 0.55) / 2.0 - 6.0).max(10.0);
+            let cx = bx + r + 6.0;
+            let cy = by + bh / 2.0;
+
+            // Filled wedge sectors.
+            let mut angle = -FRAC_PI_2; // start at 12 o'clock
+            for (i, &val) in data.values.iter().enumerate() {
+                let span  = val as f32 / total * TAU;
+                let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                fill_sector(pm, cx, cy, r, angle, angle + span, color);
+                angle += span;
+            }
+
+            // Dividing lines between slices (always in default mode;
+            // in chalk mode they are the only cue since all fills go white).
+            let line_color = if is_chalk() { GRAY } else { [10, 12, 20] };
+            let line_w     = if is_chalk() { 2.0  } else { 1.0 };
+            let mut angle  = -FRAC_PI_2;
+            for &val in &data.values {
+                let span = val as f32 / total * TAU;
+                line(pm, cx, cy,
+                     cx + r * angle.cos(), cy + r * angle.sin(),
+                     line_color, line_w);
+                angle += span;
+            }
+            // Outer ring — always visible
+            circle_stroke(pm, cx, cy, r, GRAY, 1.0);
+
+            // Legend to the right of the circle.
+            let legend_x  = cx + r + 14.0;
+            let legend_row = (bh / n as f32).min(24.0);
+            for (i, (cat, &pct)) in data.categories.iter().zip(data.values.iter()).enumerate() {
+                let ly    = by + (i as f32 + 0.5) * legend_row;
+                let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                fill(pm, legend_x, ly - 7.0, 14.0, 12.0, color);
+                text(pm, legend_x + 18.0, ly - 8.0, 1.2,
+                     &format!("{}: {}%", cat, pct), WHITE);
+            }
+        }
+
+        GraphKind::Coordinate => {
+            // Four-quadrant coordinate plane.
+            // Origin sits at ~22% from left, ~76% from top so Quadrant I has most room.
+            let ox = bx + bw * 0.22;
+            let oy = by + bh * 0.76;
+            let x_max_v = n as f32 + 0.5;
+            let y_max_v = max_v * 1.1;
+            // Pixels per unit on each axis
+            let sx = (bx + bw - 14.0 - ox) / x_max_v;
+            let sy = (oy - by - 14.0)       / y_max_v;
+
+            // Axis extents (extend slightly into negative territory)
+            let x_left   = bx + 8.0;
+            let x_right  = bx + bw - 8.0;
+            let y_top    = by + 8.0;
+            let y_bottom = by + bh - 8.0;
+
+            // Draw axes
+            line(pm, x_left, oy, x_right, oy, GRAY, 1.5);
+            line(pm, ox, y_bottom, ox, y_top, GRAY, 1.5);
+
+            // Axis name labels
+            text(pm, x_right - 12.0, oy - 16.0, 1.2, "x", GRAY);
+            text(pm, ox + 4.0, y_top + 2.0, 1.2, "y", GRAY);
+
+            // "0" at origin
+            text(pm, ox - 14.0, oy + 4.0, 1.0, "0", GRAY);
+
+            // Dim quadrant labels
+            let ql: Rgb = [45, 50, 70];
+            let q1x = (ox + x_right)  / 2.0; let q2x = (x_left + ox)   / 2.0;
+            let q1y = (y_top + oy)    / 2.0; let q4y = (oy + y_bottom) / 2.0;
+            text_centered(pm, q1x, q1y, 1.6, "I",   ql);
+            text_centered(pm, q2x, q1y, 1.6, "II",  ql);
+            text_centered(pm, q2x, q4y, 1.6, "III", ql);
+            text_centered(pm, q1x, q4y, 1.6, "IV",  ql);
+
+            // X-axis: tick marks and labels for x = 1..n
+            for i in 1..=(n as i32) {
+                let px = ox + i as f32 * sx;
+                if px > x_right { break; }
+                line(pm, px, oy - 3.0, px, oy + 3.0, GRAY, 1.0);
+                text_centered(pm, px, oy + 6.0, 1.0, &i.to_string(), GRAY);
+            }
+            // Negative x tick at -1
+            let neg_px = ox - sx;
+            if neg_px > x_left + 10.0 {
+                line(pm, neg_px, oy - 3.0, neg_px, oy + 3.0, GRAY, 1.0);
+                text_centered(pm, neg_px, oy + 6.0, 1.0, "-1", GRAY);
+            }
+
+            // Y-axis: tick marks and labels for positive y
+            let y_step = if max_v > 20.0 { 5.0f32 } else if max_v > 10.0 { 2.0 } else { 1.0 };
+            let mut yi = y_step;
+            while yi <= max_v + y_step {
+                let py = oy - yi * sy;
+                if py < y_top { break; }
+                line(pm, ox - 3.0, py, ox + 3.0, py, GRAY, 1.0);
+                text(pm, bx + 2.0, py - 6.0, 1.0, &format!("{:.0}", yi), GRAY);
+                yi += y_step;
+            }
+            // Negative y tick at -1
+            let neg_py = oy + sy;
+            if neg_py < y_bottom - 8.0 {
+                line(pm, ox - 3.0, neg_py, ox + 3.0, neg_py, GRAY, 1.0);
+                text(pm, bx + 2.0, neg_py - 6.0, 1.0, "-1", GRAY);
+            }
+
+            // Data points (no connecting line — these are independent (x,y) pairs)
+            for (i, &val) in data.values.iter().enumerate() {
+                let xi = (i + 1) as f32;
+                let px = ox + xi * sx;
+                let py = oy - val as f32 * sy;
+                let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                circle_fill(pm, px, py, 6.0, color);
+                circle_stroke(pm, px, py, 6.0, WHITE, 1.0);
+                let lbl = format!("({},{})", i + 1, val);
+                text_centered(pm, px, py - 18.0, 1.0, &lbl, WHITE);
+            }
+        }
+
+        GraphKind::Line => {
+            let ox      = bx + 32.0;
+            let oy      = by + bh - 22.0;
+            let plot_w  = bw - 42.0;
+            let plot_h  = bh - 34.0;
+            let y_max   = max_v * 1.1;
+
+            // Axes
+            line(pm, ox, by + 6.0, ox, oy, GRAY, 1.5);
+            line(pm, ox, oy, bx + bw - 4.0, oy, GRAY, 1.5);
+            if let Some(yl) = &data.y_label {
+                text(pm, bx, by, 1.0, yl.as_str(), GRAY);
+            }
+
+            // Collect pixel positions first so we can draw the connecting line,
+            // then overdraw the dots (otherwise the line covers early dots).
+            let pts: Vec<(f32, f32)> = data.values.iter().enumerate()
+                .map(|(i, &val)| {
+                    let t = (i as f32 + 0.5) / n as f32;
+                    let px = ox + t * plot_w;
+                    let py = oy - (val as f32 / y_max) * plot_h;
+                    (px, py)
+                })
+                .collect();
+
+            // Connecting lines first
+            for pair in pts.windows(2) {
+                line(pm, pair[0].0, pair[0].1, pair[1].0, pair[1].1, ACCENT, 2.5);
+            }
+
+            // Dots and labels on top
+            for (i, (&(px, py), (cat, &val))) in pts.iter().zip(data.categories.iter().zip(data.values.iter())).enumerate() {
+                let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                circle_fill(pm, px, py, 6.0, color);
+                circle_stroke(pm, px, py, 6.0, WHITE, 1.0);
+
+                // Value above dot
+                let vs = val.to_string();
+                text_centered(pm, px, py - 18.0, 1.1, &vs, WHITE);
+
+                // Category label below x-axis
+                let short: String = cat.chars().take(5).collect();
+                text_centered(pm, px, oy + 5.0, 1.0, &short, GRAY);
+            }
+        }
+
+        _ => {
+            // Bar — vertical bars, one colour per category.
+            let col_w = bw / n as f32;
+            for (i, (cat, &val)) in data.categories.iter().zip(data.values.iter()).enumerate() {
+                let color  = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
+                let bar_h  = (val as f32 / max_v) * (bh - 20.0);
+                let bx2    = bx + i as f32 * col_w + col_w * 0.1;
+                let bw2    = col_w * 0.8;
+                let ty     = by + (bh - 20.0) - bar_h;
+                fill(pm, bx2, ty, bw2, bar_h, color);
+                // value above bar
+                let vs = val.to_string();
+                text_centered(pm, bx2 + bw2 / 2.0, ty - 16.0, 1.1, &vs, WHITE);
+                // category label below baseline
+                let short: String = cat.chars().take(5).collect();
+                text_centered(pm, bx2 + bw2 / 2.0, by + bh - 14.0, 1.0, &short, GRAY);
+            }
+            line(pm, bx, by + bh - 20.0, bx + bw, by + bh - 20.0, GRAY, 1.5);
+        }
+    }
+}
+
+// -- Graph Explorer screen ---------------------------------------------------
+
+pub fn draw_graph_explorer(pm: &mut Pixmap, app: &App, wf: f32, hf: f32) {
+    use crate::graphing::{GraphData, GraphKind, EXPLORER_KIND_NAMES, EXPLORER_LABELS};
+
+    let cxc = wf / 2.0;
+    text_centered(pm, cxc, 30.0, 2.0, "GRAPH EXPLORER", CYAN);
+
+    let kind_idx = app.graph_exp_kind.min(EXPLORER_KIND_NAMES.len() - 1);
+    let kind     = GraphKind::from_explorer_index(kind_idx);
+    let labels   = EXPLORER_LABELS[kind_idx];
+    let n_cats   = labels.len().min(5);
+
+    // Kind selector at top
+    let kind_str = format!("<  {}  >", EXPLORER_KIND_NAMES[kind_idx]);
+    let kc = if app.graph_exp_field == 0 { ACCENT } else { GRAY };
+    text_centered(pm, cxc, 70.0, 1.8, &kind_str, kc);
+
+    // Chart area
+    let chart_band = (50.0, 110.0, wf - 100.0, hf * 0.45);
+    let cats: Vec<String> = labels[..n_cats].iter().map(|s| s.to_string()).collect();
+    let vals: Vec<i32>    = app.graph_exp_values[..n_cats].to_vec();
+    let data = GraphData {
+        title: EXPLORER_KIND_NAMES[kind_idx].to_string(),
+        categories: cats,
+        values: vals,
+        x_label: None,
+        y_label: None,
+    };
+    draw_graph_figure(pm, chart_band, &kind, &data);
+
+    // Value editor rows
+    let edit_top = 110.0 + hf * 0.45 + 20.0;
+    let row_h = 26.0;
+    let col = 50.0;
+    for i in 0..n_cats {
+        let field = i + 1;
+        let v = app.graph_exp_values[i];
+        let selected = app.graph_exp_field == field;
+        let label = labels[i];
+        let val_shown = if selected && !app.graph_exp_input.is_empty() {
+            format!("{}|", app.graph_exp_input)
+        } else {
+            v.to_string()
+        };
+        let row = format!("{}:  {}", label, val_shown);
+        let c = if selected { ACCENT } else { GRAY };
+        text(pm, col, edit_top + i as f32 * row_h, 1.4, &row, c);
+    }
+
+    text_centered(pm, cxc, hf - 24.0, 1.2,
+        "Up/Down: select   Left/Right: adjust   0-9: type   Enter: set   Esc: menu", GRAY);
 }

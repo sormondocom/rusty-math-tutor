@@ -12,6 +12,7 @@
 
 use crate::fraction::{FractionProblem, Mode};
 use crate::geometry::GeometryProblem;
+use crate::graphing::{GraphCmpProblem, GraphProblem, GraphQuestion};
 use crate::problem::Problem;
 use crate::topic::Topic;
 use crate::units::UnitProblem;
@@ -27,6 +28,10 @@ pub enum Active {
     Shape(FractionProblem),
     /// A geometry problem — perimeter, area, or volume of an outlined shape.
     Geo(GeometryProblem),
+    /// A graph reading / interpretation problem.
+    Graph(GraphProblem),
+    /// A two-graph comparison problem.
+    GraphCmp(GraphCmpProblem),
 }
 
 impl Active {
@@ -34,28 +39,32 @@ impl Active {
     /// into.
     pub fn topic(&self) -> Topic {
         match self {
-            Active::Arith(p) => Topic::from_op(p.op),
-            Active::Unit(_) => Topic::Units,
-            Active::Shape(s) => match s.mode {
+            Active::Arith(p)    => Topic::from_op(p.op),
+            Active::Unit(_)     => Topic::Units,
+            Active::Shape(s)    => match s.mode {
                 Mode::Fraction => Topic::Fractions,
-                Mode::Percent => Topic::Percentages,
+                Mode::Percent  => Topic::Percentages,
             },
-            Active::Geo(_) => Topic::Geometry,
+            Active::Geo(_)      => Topic::Geometry,
+            Active::Graph(_)    => Topic::Graphing,
+            Active::GraphCmp(_) => Topic::Graphing,
         }
     }
 
     /// Whether the typed `input` is a correct answer for this problem.
     pub fn check(&self, input: &str) -> bool {
         match self {
-            Active::Arith(p) => input.parse::<i64>().ok() == Some(p.answer),
-            Active::Unit(u) => input.parse::<i64>().ok() == Some(u.answer),
-            Active::Shape(s) => match s.mode {
+            Active::Arith(p)    => input.parse::<i64>().ok() == Some(p.answer),
+            Active::Unit(u)     => input.parse::<i64>().ok() == Some(u.answer),
+            Active::Shape(s)    => match s.mode {
                 Mode::Fraction => {
                     crate::fraction::parse(input).is_some_and(|(n, d)| s.is_correct(n, d))
                 }
                 Mode::Percent => input.parse::<i64>().ok().is_some_and(|v| s.is_percent_correct(v)),
             },
-            Active::Geo(g) => crate::geometry::parse(input).is_some_and(|v| g.is_correct(v)),
+            Active::Geo(g)      => crate::geometry::parse(input).is_some_and(|v| g.is_correct(v)),
+            Active::Graph(g)    => g.is_correct(input),
+            Active::GraphCmp(g) => g.is_correct(input),
         }
     }
 
@@ -64,19 +73,26 @@ impl Active {
     #[cfg(test)]
     pub fn correct_answer_string(&self) -> String {
         match self {
-            Active::Arith(p) => p.answer.to_string(),
-            Active::Unit(u) => u.answer.to_string(),
-            Active::Shape(s) => match s.mode {
+            Active::Arith(p)    => p.answer.to_string(),
+            Active::Unit(u)     => u.answer.to_string(),
+            Active::Shape(s)    => match s.mode {
                 Mode::Fraction => format!("{}/{}", s.shaded, s.total),
-                Mode::Percent => s.percent_answer().to_string(),
+                Mode::Percent  => s.percent_answer().to_string(),
             },
-            Active::Geo(g) => g.answer.to_string(),
+            Active::Geo(g)      => g.answer.to_string(),
+            Active::Graph(g)    => g.answer_label(),
+            Active::GraphCmp(g) => g.answer.to_string(),
         }
     }
 
     /// Whether the answer field accepts a `/` (only "a/b" fraction answers).
     pub fn accepts_slash(&self) -> bool {
         matches!(self, Active::Shape(s) if s.mode == Mode::Fraction)
+    }
+
+    /// Whether the answer field accepts a `,` (only coordinate-plane PlotPoint).
+    pub fn accepts_comma(&self) -> bool {
+        matches!(self, Active::Graph(g) if matches!(g.question, GraphQuestion::PlotPoint(_)))
     }
 
     /// Whether the answer field accepts a leading `-` (only signed arithmetic).

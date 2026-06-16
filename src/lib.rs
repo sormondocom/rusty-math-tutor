@@ -32,6 +32,7 @@
 // main.rs points crate::shapes at the terminal file (full drawing surface).
 #[path = "core/shapes.rs"]     mod shapes;
 #[path = "core/geometry.rs"]   mod geometry;
+#[path = "core/graphing.rs"]   mod graphing;
 #[path = "core/input.rs"]      mod input;
 #[path = "core/motivation.rs"] mod motivation;
 #[path = "core/problem.rs"]    mod problem;

@@ -30,5 +30,6 @@ pub fn draw(f: &mut Frame, app: &App, fx: &Transitions) {
         Screen::Experiment                   => draw_experiment(f, app, area),
         Screen::Time                         => draw_time(f, app, area),
         Screen::Help                         => draw_help(f, area),
+        Screen::GraphExplorer                => draw_graph_explorer(f, app, area),
     }
 }

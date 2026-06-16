@@ -29,6 +29,9 @@ pub struct ChallengeRecord {
     /// Units=4 Fractions=5 Percentages=6 Geometry=7).
     #[serde(default)]
     pub by_topic: [u32; 8],
+    /// Overflow for Graphing (index 0) — kept separate so old saves remain valid.
+    #[serde(default)]
+    pub by_topic_ext: [u32; 1],
     /// Correct answers indexed by grade (0=K, 1–8).
     #[serde(default)]
     pub by_grade: [u32; 9],
@@ -66,6 +69,9 @@ pub struct Student {
     /// Geometry problems solved.
     #[serde(default)]
     pub geometry_solved: u32,
+    /// Graphing problems solved (includes comparison problems).
+    #[serde(default)]
+    pub graphing_solved: u32,
     /// Problems solved broken down by grade level (index 0 = K, 1–8 = grades 1–8).
     #[serde(default)]
     pub grade_solved: [u32; 9],
@@ -93,6 +99,8 @@ pub struct Student {
     pub pref_percents: bool,
     #[serde(default)]
     pub pref_geometry: bool,
+    #[serde(default)]
+    pub pref_graphing: bool,
 
     /// Completed challenge runs, oldest first.  Capped at [`CHALLENGE_HISTORY_CAP`].
     #[serde(default)]
@@ -108,6 +116,7 @@ impl Student {
             fractions_solved: 0,
             percents_solved: 0,
             geometry_solved: 0,
+            graphing_solved: 0,
             grade_solved: [0; 9],
             best_streak: 0,
             reveal_lock: default_reveal_lock(),
@@ -118,6 +127,7 @@ impl Student {
             pref_fractions: false,
             pref_percents: false,
             pref_geometry: false,
+            pref_graphing: false,
             challenge_history: Vec::new(),
         }
     }
@@ -129,20 +139,26 @@ impl Student {
 
     /// Every kind of problem solved — across all topics.
     pub fn grand_total(&self) -> u32 {
-        self.total() + self.units_solved + self.fractions_solved + self.percents_solved + self.geometry_solved
+        self.total()
+            + self.units_solved
+            + self.fractions_solved
+            + self.percents_solved
+            + self.geometry_solved
+            + self.graphing_solved
     }
 
     /// How many problems this student has solved for a given [`Topic`].
     pub fn solved_for(&self, topic: Topic) -> u32 {
         match topic {
-            Topic::Add => self.solved[0],
-            Topic::Sub => self.solved[1],
-            Topic::Mul => self.solved[2],
-            Topic::Div => self.solved[3],
-            Topic::Units => self.units_solved,
-            Topic::Fractions => self.fractions_solved,
-            Topic::Percentages => self.percents_solved,
-            Topic::Geometry => self.geometry_solved,
+            Topic::Add            => self.solved[0],
+            Topic::Sub            => self.solved[1],
+            Topic::Mul            => self.solved[2],
+            Topic::Div            => self.solved[3],
+            Topic::Units          => self.units_solved,
+            Topic::Fractions      => self.fractions_solved,
+            Topic::Percentages    => self.percents_solved,
+            Topic::Geometry       => self.geometry_solved,
+            Topic::Graphing       => self.graphing_solved,
         }
     }
 
@@ -150,10 +166,11 @@ impl Student {
     pub fn record_topic(&mut self, topic: Topic) {
         match topic {
             Topic::Add | Topic::Sub | Topic::Mul | Topic::Div => self.solved[topic.index()] += 1,
-            Topic::Units => self.units_solved += 1,
-            Topic::Fractions => self.fractions_solved += 1,
-            Topic::Percentages => self.percents_solved += 1,
-            Topic::Geometry => self.geometry_solved += 1,
+            Topic::Units           => self.units_solved      += 1,
+            Topic::Fractions       => self.fractions_solved  += 1,
+            Topic::Percentages     => self.percents_solved   += 1,
+            Topic::Geometry        => self.geometry_solved   += 1,
+            Topic::Graphing        => self.graphing_solved   += 1,
         }
     }
 
@@ -161,10 +178,11 @@ impl Student {
     pub fn reset_topic(&mut self, topic: Topic) {
         match topic {
             Topic::Add | Topic::Sub | Topic::Mul | Topic::Div => self.solved[topic.index()] = 0,
-            Topic::Units => self.units_solved = 0,
-            Topic::Fractions => self.fractions_solved = 0,
-            Topic::Percentages => self.percents_solved = 0,
-            Topic::Geometry => self.geometry_solved = 0,
+            Topic::Units           => self.units_solved      = 0,
+            Topic::Fractions       => self.fractions_solved  = 0,
+            Topic::Percentages     => self.percents_solved   = 0,
+            Topic::Geometry        => self.geometry_solved   = 0,
+            Topic::Graphing        => self.graphing_solved   = 0,
         }
     }
 
@@ -180,7 +198,8 @@ impl Student {
         self.units_solved = 0;
         self.fractions_solved = 0;
         self.percents_solved = 0;
-        self.geometry_solved = 0;
+        self.geometry_solved  = 0;
+        self.graphing_solved  = 0;
         self.grade_solved = [0; 9];
         self.best_streak = 0;
     }

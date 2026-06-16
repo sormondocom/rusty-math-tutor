@@ -12,7 +12,7 @@ use ratatui::Frame;
 use crate::app::{App, TeacherView, SETTINGS_FIELDS};
 use crate::student::ChallengeRecord;
 
-const TOPIC_SYMBOLS: [&str; 8] = ["+", "\u{2212}", "\u{00D7}", "\u{00F7}", "units", "%", "\u{2044}", "\u{03C0}"];
+const TOPIC_SYMBOLS: [&str; 10] = ["+", "\u{2212}", "\u{00D7}", "\u{00F7}", "units", "%", "\u{2044}", "\u{03C0}", "graph", "cmp"];
 use crate::duck::{self, Pose};
 use crate::{font, problem};
 
@@ -80,10 +80,12 @@ pub fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
     items.push((format!("{} Fractions", mark(app.menu_fractions)), "(shapes & pieces)"));
     items.push((format!("{} Percentages", mark(app.menu_percents)), "(shapes out of 100)"));
     items.push((format!("{} Geometry", mark(app.menu_geometry)), "(perimeter, area, volume)"));
+    items.push((format!("{} Graphing", mark(app.menu_graphing)), "(bar, line, pie, pictograph, compare)"));
     items.push(("▶  Start Practice".to_string(), "(no timer)"));
     let challenge_hint = format!("({}s timer)", app.roster.current().challenge_secs);
     items.push(("▶  Start Challenge".to_string(), challenge_hint.as_str()));
     items.push(("▶  Time Explorer".to_string(), "(clocks & time zones)"));
+    items.push(("▶  Graph Explorer".to_string(), "(build & explore graphs)"));
     items.push(("▶  Experimentation".to_string(), "(explore unit conversions)"));
     items.push(("Settings (number ranges)...".to_string(), "(Enter to open)"));
     items.push(("My Progress...".to_string(), "(Enter to view)"));
@@ -442,7 +444,7 @@ fn draw_teacher_anecdotes(buf: &mut Buffer, app: &App, area: Rect, col: u16) {
 
 /// Short column headers for each section, in [`Topic::ALL`] order.  Kept to a
 /// few characters so all sections fit one row.
-const REC_COLS: [&str; 8] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct", "Geo"];
+const REC_COLS: [&str; 9] = ["Add", "Sub", "Mul", "Div", "Un", "Fr", "Pct", "Geo", "Grph"];
 /// Left edge of the name column within the 5-wide section grid.
 const REC_NAME_W: u16 = 12;
 /// Width of each per-section count column.
@@ -1081,5 +1083,223 @@ pub fn draw_help(f: &mut Frame, area: Rect) {
     let footer = " Esc · Enter · H: close ";
     let fx = bx + (bw / 2).saturating_sub(footer.len() as u16 / 2);
     put_str(buf, fx, by + bh - 1, footer,
+        Style::default().fg(Color::DarkGray));
+}
+
+// -- Graph Explorer ----------------------------------------------------------
+
+pub fn draw_graph_explorer(f: &mut Frame, app: &App, area: Rect) {
+    use crate::graphing::{EXPLORER_KIND_NAMES, EXPLORER_LABELS};
+
+    let buf = f.buffer_mut();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::LightMagenta))
+        .title(" Graph Explorer ")
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    let kind = app.graph_exp_kind.min(EXPLORER_KIND_NAMES.len() - 1);
+    let labels = EXPLORER_LABELS[kind];
+    let n_cats = labels.len().min(5);
+    let sel = app.graph_exp_field;
+
+    // --- Kind row ---
+    let kind_label = format!(
+        "Graph type:  < {} >",
+        EXPLORER_KIND_NAMES[kind]
+    );
+    let ks = if sel == 0 {
+        Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    put_str(buf, inner.left() + 2, inner.top() + 1, &kind_label, ks);
+    if sel == 0 {
+        put_str(buf, inner.left() + 2, inner.top() + 2, "Left/Right to change kind", Style::default().fg(Color::DarkGray));
+    }
+
+    // --- ASCII chart (kind-specific) ---
+    let chart_top = inner.top() + 4;
+    let chart_h   = (inner.height.saturating_sub(12)).max(4);
+    let max_val   = app.graph_exp_values[..n_cats].iter().copied().max().unwrap_or(1).max(1);
+    let col_w     = (inner.width.saturating_sub(8) / n_cats as u16).max(3);
+
+    match kind {
+        // 0 = Bar — vertical columns
+        0 => {
+            // baseline
+            for x in inner.left() + 2..inner.right().saturating_sub(2) {
+                buf[(x, chart_top + chart_h)].set_char('─').set_style(Style::default().fg(Color::Gray));
+            }
+            for (i, lbl) in labels[..n_cats].iter().enumerate() {
+                let v = app.graph_exp_values[i];
+                let bar_h = (v as f32 / max_val as f32 * chart_h as f32).round() as u16;
+                let bx    = inner.left() + 2 + i as u16 * col_w;
+                let bar_w = col_w.saturating_sub(1).max(1);
+                let st_bar = if sel == i + 1 {
+                    Style::default().fg(Color::LightCyan)
+                } else {
+                    Style::default().fg(Color::LightBlue)
+                };
+                for col in 0..bar_w {
+                    let cx = bx + col;
+                    if cx >= inner.right().saturating_sub(1) { break; }
+                    for row in 0..chart_h {
+                        if chart_h - 1 - row < bar_h {
+                            buf[(cx, chart_top + row)].set_char('█').set_style(st_bar);
+                        }
+                    }
+                }
+                // tick
+                let center_x = bx + bar_w / 2;
+                if center_x < inner.right() {
+                    buf[(center_x, chart_top + chart_h)].set_char('┼').set_style(Style::default().fg(Color::Gray));
+                }
+                // value above bar
+                let val_str = v.to_string();
+                let bar_top_y = chart_top + chart_h.saturating_sub(bar_h);
+                let v_y = if bar_top_y > chart_top { bar_top_y - 1 } else { chart_top };
+                let v_x = bx + bar_w / 2 - val_str.len() as u16 / 2;
+                if v_x < inner.right() {
+                    put_str(buf, v_x, v_y, &val_str, Style::default().fg(Color::White));
+                }
+                // label below axis
+                let short = &lbl[..lbl.chars().count().min(col_w as usize)];
+                let l_x = bx + bar_w / 2 - short.chars().count() as u16 / 2;
+                let l_y = chart_top + chart_h + 1;
+                if l_y < inner.bottom() && l_x < inner.right() {
+                    put_str(buf, l_x, l_y, short, Style::default().fg(Color::Gray));
+                }
+            }
+        }
+        // 1 = Pictograph — horizontal rows of * symbols
+        1 => {
+            let max_lbl = labels[..n_cats].iter().map(|l| l.chars().count()).max().unwrap_or(1);
+            let sym_avail = (inner.width as usize).saturating_sub(max_lbl + 10);
+            let max_syms  = (sym_avail / 2).max(1);
+            for (i, lbl) in labels[..n_cats].iter().enumerate() {
+                let v = app.graph_exp_values[i];
+                let symbols = v.max(0) as usize;
+                let sym_str = vec!["*"; symbols.min(max_syms)].join(" ");
+                let st = if sel == i + 1 {
+                    Style::default().fg(Color::LightCyan)
+                } else {
+                    Style::default().fg(Color::LightBlue)
+                };
+                let row_str = format!("{:>width$} │ {:<sym_w$}  {}",
+                    lbl, sym_str, v,
+                    width = max_lbl, sym_w = max_syms * 2);
+                let y = chart_top + i as u16;
+                if y < inner.bottom().saturating_sub(2) {
+                    put_str(buf, inner.left() + 2, y, &row_str, st);
+                }
+            }
+            let note_y = chart_top + n_cats as u16 + 1;
+            if note_y < inner.bottom().saturating_sub(2) {
+                put_str(buf, inner.left() + 2, note_y, "(each * = 1 unit)", Style::default().fg(Color::DarkGray));
+            }
+        }
+        // 2 = Line — dots on a grid with x-axis
+        2 => {
+            // x-axis
+            let axis_y = chart_top + chart_h;
+            for x in inner.left() + 2..inner.right().saturating_sub(2) {
+                buf[(x, axis_y)].set_char('─').set_style(Style::default().fg(Color::Gray));
+            }
+            // y-axis
+            for y in chart_top..=axis_y {
+                buf[(inner.left() + 2, y)].set_char('│').set_style(Style::default().fg(Color::Gray));
+            }
+            buf[(inner.left() + 2, axis_y)].set_char('└').set_style(Style::default().fg(Color::Gray));
+
+            let plot_w = inner.width.saturating_sub(6) as f32;
+            for (i, lbl) in labels[..n_cats].iter().enumerate() {
+                let v = app.graph_exp_values[i];
+                let px = inner.left() + 3 + ((i as f32 + 0.5) / n_cats as f32 * plot_w).round() as u16;
+                let py = axis_y.saturating_sub((v as f32 / max_val as f32 * chart_h as f32).round() as u16);
+                let st = if sel == i + 1 { Style::default().fg(Color::LightCyan) } else { Style::default().fg(Color::LightBlue) };
+                if px < inner.right() && py >= chart_top {
+                    buf[(px, py)].set_char('●').set_style(st);
+                }
+                // connect to previous point with '·'
+                if i > 0 {
+                    let pv = app.graph_exp_values[i - 1];
+                    let ppx = inner.left() + 3 + (((i - 1) as f32 + 0.5) / n_cats as f32 * plot_w).round() as u16;
+                    let ppy = axis_y.saturating_sub((pv as f32 / max_val as f32 * chart_h as f32).round() as u16);
+                    if px > ppx + 1 {
+                        let mid = (ppx + px) / 2;
+                        let mid_y = (py + ppy) / 2;
+                        if mid < inner.right() && mid_y >= chart_top {
+                            buf[(mid, mid_y)].set_char('·').set_style(Style::default().fg(Color::Gray));
+                        }
+                    }
+                }
+                // label on axis
+                if px < inner.right() {
+                    put_str(buf, px, axis_y + 1, &lbl[..lbl.chars().count().min(3)], Style::default().fg(Color::Gray));
+                }
+            }
+        }
+        // 3 = Pie — ASCII circle + legend
+        3 => {
+            let cats: Vec<String>  = labels[..n_cats].iter().map(|s| s.to_string()).collect();
+            let vals: Vec<i32>     = app.graph_exp_values[..n_cats].to_vec();
+            let pie_band = Rect {
+                x:      inner.left() + 2,
+                y:      chart_top,
+                width:  inner.width.saturating_sub(4),
+                height: chart_h,
+            };
+            draw_ascii_pie(buf, pie_band, &cats, &vals);
+        }
+        // 4 = Coordinate Plane — proper four-quadrant grid
+        _ => {
+            let cats: Vec<String> = labels[..n_cats].iter().map(|s| s.to_string()).collect();
+            let vals: Vec<i32>    = app.graph_exp_values[..n_cats].to_vec();
+            let coord_band = Rect {
+                x:      inner.left() + 2,
+                y:      chart_top,
+                width:  inner.width.saturating_sub(4),
+                height: chart_h,
+            };
+            let sel_pt = if sel > 0 { Some(sel) } else { None };
+            draw_ascii_coord(buf, coord_band, &cats, &vals, sel_pt);
+        }
+    }
+
+    // --- Value edit rows below chart ---
+    let edit_top = chart_top + chart_h + 3;
+    for (i, lbl) in labels[..n_cats].iter().enumerate() {
+        let field = i + 1;
+        let v = app.graph_exp_values[i];
+        let editing = sel == field;
+        let displayed = if editing && !app.graph_exp_input.is_empty() {
+            app.graph_exp_input.as_str()
+        } else {
+            ""
+        };
+        let row_str = if editing && !displayed.is_empty() {
+            format!("[{}] {} = {}▌", if editing { ">" } else { " " }, lbl, displayed)
+        } else {
+            format!("[{}] {} = {}", if editing { ">" } else { " " }, lbl, v)
+        };
+        let st = if editing {
+            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let y = edit_top + i as u16;
+        if y < inner.bottom().saturating_sub(1) {
+            put_str(buf, inner.left() + 2, y, &row_str, st);
+        }
+    }
+
+    // Footer
+    let footer = "Up/Down: select    Left/Right: adjust    0-9: type value    Enter: confirm    Esc: menu";
+    put_str(buf, inner.left() + 1, inner.bottom().saturating_sub(1),
+        &footer[..footer.chars().count().min(inner.width.saturating_sub(2) as usize)],
         Style::default().fg(Color::DarkGray));
 }

@@ -70,8 +70,10 @@ pub fn draw_help(pm: &mut Pixmap, app: &App, (cx0, cy0, cw, ch): (f32, f32, f32,
             };
             hint_body(pm, inner_x, y, body_w, body_bottom, &hint, &s.answer_label(), app.revealed, app.anim_frame);
         }
-        Active::Unit(u) => hint_body(pm, inner_x, y, body_w, body_bottom, &u.hint, &format!("Answer: {} {}", u.answer, u.unit_label), app.revealed, app.anim_frame),
-        Active::Geo(g) => hint_body(pm, inner_x, y, body_w, body_bottom, &g.hint, &g.answer_label(), app.revealed, app.anim_frame),
+        Active::Unit(u)     => hint_body(pm, inner_x, y, body_w, body_bottom, &u.hint, &format!("Answer: {} {}", u.answer, u.unit_label), app.revealed, app.anim_frame),
+        Active::Geo(g)      => hint_body(pm, inner_x, y, body_w, body_bottom, &g.hint, &g.answer_label(), app.revealed, app.anim_frame),
+        Active::Graph(g)    => hint_body(pm, inner_x, y, body_w, body_bottom, &g.hint, &g.answer_label(), app.revealed, app.anim_frame),
+        Active::GraphCmp(g) => hint_body(pm, inner_x, y, body_w, body_bottom, &g.hint, &g.answer_label(), app.revealed, app.anim_frame),
     }
 
     // Footer controls.

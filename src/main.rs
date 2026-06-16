@@ -27,6 +27,8 @@ mod config;
 mod fraction;
 #[path = "core/geometry.rs"]
 mod geometry;
+#[path = "core/graphing.rs"]
+mod graphing;
 #[path = "core/input.rs"]
 mod input;
 #[path = "core/motivation.rs"]

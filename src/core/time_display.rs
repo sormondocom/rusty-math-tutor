@@ -392,6 +392,14 @@ pub const HOTKEYS: &[(&str, &[(&str, &str)])] = &[
         ("Backspace",   "Delete last digit"),
         ("Esc",         "Return to menu"),
     ]),
+    ("Graph Explorer", &[
+        ("↑ / ↓",      "Switch the selected field"),
+        ("← / →",      "Change graph type or adjust value"),
+        ("0 – 9",       "Type a value for the selected bar"),
+        ("Backspace",   "Delete last digit"),
+        ("Enter",       "Confirm current edit"),
+        ("Esc",         "Return to menu"),
+    ]),
     ("General", &[
         ("Esc",         "Always returns to the previous screen"),
         ("H",           "Context-sensitive help on most screens"),

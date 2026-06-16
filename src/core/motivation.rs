@@ -160,6 +160,25 @@ const GEOMETRY: &[&str] = &[
     "Building a sandbox and filling it with the right sand",
 ];
 
+const GRAPHING: &[&str] = &[
+    "Reading a bar chart to pick the most popular pizza topping at your school",
+    "Looking at a weather map's pie chart to know when rain is likely",
+    "Using a line graph to see how your savings grow over weeks",
+    "Reading pictographs on product labels to compare servings",
+    "Spotting the fastest athlete by reading a speed-vs-time line graph",
+    "Identifying which movie genre earned the most from a bar chart",
+    "Using a coordinate plane to program a robot's path",
+    "Reading a pie chart to budget how you spend your allowance",
+    "Tracking a plant's daily height on a line graph to spot growth trends",
+    "Interpreting a city's traffic data shown as a bar chart",
+    "Comparing election results across districts on a grouped bar chart",
+    "Reading a scatter plot to see if taller people generally run faster",
+    "Using a coordinate grid to design a video-game map",
+    "Understanding a stock chart to know if a company is growing",
+    "Reading a pie chart of ingredients to scale a recipe correctly",
+    "Interpreting temperature graphs to decide what to wear each day",
+];
+
 const PERCENTAGES: &[&str] = &[
     "Working out how much you save with 25% off at a sale",
     "Reading a phone battery that says it's 80% charged",
@@ -270,16 +289,28 @@ const GEOMETRY_CODE: &[CodeNote] = &[
     },
 ];
 
+const GRAPHING_CODE: &[CodeNote] = &[
+    CodeNote {
+        code: "let bar_h = (v as f32 / max as f32) * chart_h;",
+        why: "Scaling a value to a chart height is exactly how every bar in a bar chart is drawn.",
+    },
+    CodeNote {
+        code: "let angle = 2.0 * PI * (pct as f32 / 100.0);",
+        why: "A pie slice's sweep angle is a percentage mapped to radians — fractions of a full circle.",
+    },
+];
+
 fn code_notes(topic: Topic) -> &'static [CodeNote] {
     match topic {
-        Topic::Add => ADD_CODE,
-        Topic::Sub => SUB_CODE,
-        Topic::Mul => MUL_CODE,
-        Topic::Div => DIV_CODE,
-        Topic::Units => UNITS_CODE,
-        Topic::Fractions => FRACTIONS_CODE,
-        Topic::Percentages => PERCENTAGES_CODE,
-        Topic::Geometry => GEOMETRY_CODE,
+        Topic::Add            => ADD_CODE,
+        Topic::Sub            => SUB_CODE,
+        Topic::Mul            => MUL_CODE,
+        Topic::Div            => DIV_CODE,
+        Topic::Units          => UNITS_CODE,
+        Topic::Fractions      => FRACTIONS_CODE,
+        Topic::Percentages    => PERCENTAGES_CODE,
+        Topic::Geometry       => GEOMETRY_CODE,
+        Topic::Graphing       => GRAPHING_CODE,
     }
 }
 
@@ -290,14 +321,15 @@ pub fn pick_code(topic: Topic, rng: &mut impl Rng) -> Option<(String, String)> {
 
 fn applications(topic: Topic) -> &'static [&'static str] {
     match topic {
-        Topic::Add => ADDITION,
-        Topic::Sub => SUBTRACTION,
-        Topic::Mul => MULTIPLICATION,
-        Topic::Div => DIVISION,
-        Topic::Units => UNITS,
-        Topic::Fractions => FRACTIONS,
-        Topic::Percentages => PERCENTAGES,
-        Topic::Geometry => GEOMETRY,
+        Topic::Add             => ADDITION,
+        Topic::Sub             => SUBTRACTION,
+        Topic::Mul             => MULTIPLICATION,
+        Topic::Div             => DIVISION,
+        Topic::Units           => UNITS,
+        Topic::Fractions       => FRACTIONS,
+        Topic::Percentages     => PERCENTAGES,
+        Topic::Geometry        => GEOMETRY,
+        Topic::Graphing        => GRAPHING,
     }
 }
 
@@ -339,6 +371,8 @@ pub struct Extras {
     percentages: Vec<String>,
     #[serde(default)]
     geometry: Vec<String>,
+    #[serde(default)]
+    graphing: Vec<String>,
 }
 
 impl Extras {
@@ -357,14 +391,15 @@ impl Extras {
 
     fn list(&self, topic: Topic) -> &[String] {
         match topic {
-            Topic::Add => &self.add,
-            Topic::Sub => &self.sub,
-            Topic::Mul => &self.mul,
-            Topic::Div => &self.div,
-            Topic::Units => &self.units,
-            Topic::Fractions => &self.fractions,
-            Topic::Percentages => &self.percentages,
-            Topic::Geometry => &self.geometry,
+            Topic::Add             => &self.add,
+            Topic::Sub             => &self.sub,
+            Topic::Mul             => &self.mul,
+            Topic::Div             => &self.div,
+            Topic::Units           => &self.units,
+            Topic::Fractions       => &self.fractions,
+            Topic::Percentages     => &self.percentages,
+            Topic::Geometry        => &self.geometry,
+            Topic::Graphing        => &self.graphing,
         }
     }
 
@@ -375,14 +410,15 @@ impl Extras {
 
     fn list_mut(&mut self, topic: Topic) -> &mut Vec<String> {
         match topic {
-            Topic::Add => &mut self.add,
-            Topic::Sub => &mut self.sub,
-            Topic::Mul => &mut self.mul,
-            Topic::Div => &mut self.div,
-            Topic::Units => &mut self.units,
-            Topic::Fractions => &mut self.fractions,
-            Topic::Percentages => &mut self.percentages,
-            Topic::Geometry => &mut self.geometry,
+            Topic::Add             => &mut self.add,
+            Topic::Sub             => &mut self.sub,
+            Topic::Mul             => &mut self.mul,
+            Topic::Div             => &mut self.div,
+            Topic::Units           => &mut self.units,
+            Topic::Fractions       => &mut self.fractions,
+            Topic::Percentages     => &mut self.percentages,
+            Topic::Geometry        => &mut self.geometry,
+            Topic::Graphing        => &mut self.graphing,
         }
     }
 

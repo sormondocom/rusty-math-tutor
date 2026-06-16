@@ -61,6 +61,25 @@ pub fn draw_card(pm: &mut Pixmap, active: &Active, input: &str, feedback: Feedba
                 answer_y = band.1 + band.3 + 26.0;
                 ans_scale = 4.0;
             }
+            Active::Graph(g) => {
+                // Push the chart down so there is breathing room under the question.
+                let gband = (cx0 + 50.0, cy0 + 130.0, cw - 100.0, ch * 0.32);
+                draw_graph_figure(pm, gband, &g.kind, &g.data);
+                answer_y = gband.1 + gband.3 + 26.0;
+                ans_scale = 4.0;
+            }
+            Active::GraphCmp(g) => {
+                // Extra headroom for the "Group 1 / Group 2" labels above the charts.
+                let gband = (cx0 + 50.0, cy0 + 150.0, cw - 100.0, ch * 0.30);
+                let half  = (gband.0, gband.1, gband.2 / 2.0 - 4.0, gband.3);
+                let right = (gband.0 + gband.2 / 2.0 + 4.0, gband.1, gband.2 / 2.0 - 4.0, gband.3);
+                draw_graph_figure(pm, half,  &g.kind, &g.data_a);
+                draw_graph_figure(pm, right, &g.kind, &g.data_b);
+                text(pm, half.0,  half.1  - 18.0, 1.3, "Group 1", ACCENT);
+                text(pm, right.0, right.1 - 18.0, 1.3, "Group 2", YELLOW);
+                answer_y = gband.1 + gband.3 + 26.0;
+                ans_scale = 4.0;
+            }
             _ => {}
         }
 
@@ -162,8 +181,10 @@ fn question_of(active: &Active) -> String {
         // Chalk is monochrome, so the colour ("...is purple?") is meaningless —
         // ask about the *shaded* (filled) share instead, to match the figure.
         Active::Shape(s) if is_chalk() => shaded_question(s),
-        Active::Shape(s) => s.question(),
-        Active::Geo(g) => g.question(),
+        Active::Shape(s)    => s.question(),
+        Active::Geo(g)      => g.question(),
+        Active::Graph(g)    => g.question_text(),
+        Active::GraphCmp(g) => g.question_text(),
     }
 }
 

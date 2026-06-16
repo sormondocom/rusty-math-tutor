@@ -570,3 +570,459 @@ fn draw_division_house(inner: Rect, buf: &mut Buffer, p: &Problem, input: &str) 
     font::draw_text(buf, x0, dvd_y, &divisor, accent);
     font::draw_text(buf, dividend_x, dvd_y, &dividend, accent);
 }
+
+// ---------------------------------------------------------------------------
+// Graphing
+// ---------------------------------------------------------------------------
+
+const GRAPH_ACCENT: Color = Color::LightMagenta;
+const GRAPH_BAR: Color = Color::LightBlue;
+const GRAPH_CMP_A: Color = Color::LightCyan;
+const GRAPH_CMP_B: Color = Color::LightYellow;
+
+/// ASCII bar chart drawn into `band` (y grows down, bar grows up).
+/// `numbered`: when true, prefixes each label with its 1-based index so students
+/// can enter the number directly for FindMax / FindMin questions.
+fn draw_ascii_bar(buf: &mut Buffer, band: Rect, cats: &[String], values: &[i32], accent: Color, numbered: bool) {
+    if band.height < 3 || band.width < 4 || cats.is_empty() { return; }
+    let n = cats.len();
+    let max_v = values.iter().copied().max().unwrap_or(1).max(1);
+    // chart_h: rows available for bars; -2 for baseline row + label row
+    let chart_h = band.height.saturating_sub(2);
+    let col_w   = (band.width / n as u16).max(2);
+    let bar_w   = col_w.saturating_sub(1).max(1); // leave 1-char gap between bars
+
+    // Baseline across the full band width
+    for x in band.left()..band.right() {
+        buf[(x, band.top() + chart_h)].set_char('─').set_style(Style::default().fg(Color::Gray));
+    }
+
+    let st = Style::default().fg(accent);
+    for (i, (cat, &val)) in cats.iter().zip(values.iter()).enumerate() {
+        let bar_h = ((val as f32 / max_v as f32) * chart_h as f32).round() as u16;
+        let bx    = band.left() + i as u16 * col_w;
+        if bx >= band.right() { break; }
+
+        // Draw filled bar (bar_w columns wide)
+        for col in 0..bar_w {
+            let cx = bx + col;
+            if cx >= band.right() { break; }
+            for row in 0..chart_h {
+                if chart_h - 1 - row < bar_h {
+                    buf[(cx, band.top() + row)].set_char('█').set_style(st);
+                }
+            }
+        }
+
+        // Tick on baseline at bar center
+        let center_x = bx + bar_w / 2;
+        if center_x < band.right() {
+            buf[(center_x, band.top() + chart_h)].set_char('┼').set_style(Style::default().fg(Color::Gray));
+        }
+
+        // Value label just above the bar top, centered in the bar
+        let val_str = val.to_string();
+        let v_len   = val_str.len() as u16;
+        let v_x     = bx + bar_w / 2 - v_len / 2;
+        let bar_top_y = band.top() + chart_h.saturating_sub(bar_h);
+        let v_y = if bar_top_y > band.top() { bar_top_y - 1 } else { band.top() };
+        if v_x < band.right() {
+            put_str(buf, v_x, v_y, &val_str, Style::default().fg(Color::White));
+        }
+
+        // Category label below baseline, centered in the column, truncated to col_w
+        let label = if numbered {
+            let prefix = format!("{}.", i + 1);
+            let remaining = col_w as usize - prefix.len().min(col_w as usize);
+            format!("{}{}", prefix, cat.chars().take(remaining).collect::<String>())
+        } else {
+            cat.chars().take(col_w as usize).collect()
+        };
+        let l_len = label.chars().count() as u16;
+        let l_x   = bx + bar_w / 2 - l_len / 2;
+        let l_y   = band.top() + chart_h + 1;
+        if l_y < band.bottom() && l_x < band.right() {
+            put_str(buf, l_x, l_y, &label, Style::default().fg(Color::Gray));
+        }
+    }
+}
+
+// Per-slice colour palette used for both pie circle and legend.
+const PIE_COLORS: [Color; 6] = [
+    Color::LightCyan, Color::LightYellow, Color::LightGreen,
+    Color::LightMagenta, Color::LightRed, Color::LightBlue,
+];
+
+/// Draw an ASCII circle pie chart with a colour-coded legend to the right.
+///
+/// Circle width ≈ 2 × height (character aspect ratio correction).
+/// Each cell's fill colour is determined by its angle from the centre.
+pub fn draw_ascii_pie(buf: &mut Buffer, band: Rect, cats: &[String], values: &[i32]) {
+    if band.height < 4 || band.width < 10 || cats.is_empty() { return; }
+
+    let n      = cats.len();
+    let total  = values.iter().sum::<i32>().max(1);
+
+    // Cumulative fractions [0.0..1.0], 12 o'clock = 0, clockwise.
+    let mut cum = vec![0.0f64];
+    for &v in values {
+        let last = *cum.last().unwrap();
+        cum.push(last + v as f64 / total as f64);
+    }
+
+    // Circle: height = band.height, width ≈ 2× height so it looks round.
+    let circle_h = band.height as usize;
+    let circle_w = (circle_h * 2).min(band.width as usize / 2 + 2).min(band.width as usize);
+    let cx = (circle_w as f64 - 1.0) / 2.0;
+    let cy = (circle_h as f64 - 1.0) / 2.0;
+
+    for row in 0..circle_h {
+        for col in 0..circle_w {
+            let bx = band.left() + col as u16;
+            let by = band.top()  + row as u16;
+            if bx >= band.right() || by >= band.bottom() { continue; }
+
+            // Normalised coords (–1..1); both axes scaled identically → round circle.
+            let nx = if cx > 0.0 { (col as f64 - cx) / cx } else { 0.0 };
+            let ny = if cy > 0.0 { (row as f64 - cy) / cy } else { 0.0 };
+
+            if nx * nx + ny * ny > 1.0 { continue; } // outside circle
+
+            // Angle from 12 o'clock, clockwise (screen y increases downward).
+            use std::f64::consts::{FRAC_PI_2, PI};
+            let raw  = ny.atan2(nx); // –π..π, 0 = right (3 o'clock)
+            let frac = ((raw + FRAC_PI_2) / (2.0 * PI) + 1.0) % 1.0;
+
+            // Which slice?
+            let idx = cum.partition_point(|&c| c <= frac).saturating_sub(1).min(n - 1);
+            buf[(bx, by)].set_char('█').set_style(Style::default().fg(PIE_COLORS[idx % PIE_COLORS.len()]));
+        }
+    }
+
+    // Legend to the right of the circle.
+    let legend_x = band.left() + circle_w as u16 + 1;
+    for (i, (cat, &val)) in cats.iter().zip(values.iter()).enumerate() {
+        let pct   = (val as f64 / total as f64 * 100.0).round() as i32;
+        let color = PIE_COLORS[i % PIE_COLORS.len()];
+        let ly    = band.top() + i as u16;
+        if ly >= band.bottom() || legend_x + 1 >= band.right() { break; }
+
+        buf[(legend_x, ly)].set_char('█').set_style(Style::default().fg(color));
+        if legend_x + 1 < band.right() {
+            buf[(legend_x + 1, ly)].set_char('█').set_style(Style::default().fg(color));
+        }
+        let label  = format!(" {}. {} {}%", i + 1, cat, pct);
+        let avail  = band.right().saturating_sub(legend_x + 2) as usize;
+        let text: String = label.chars().take(avail).collect();
+        put_str(buf, legend_x + 2, ly, &text, Style::default().fg(Color::White));
+    }
+}
+
+/// Draw an ASCII coordinate plane with all four quadrants into `band`.
+/// `cats` supplies the x-value labels ("1","2"…); `values[i]` is the y-value
+/// at that x.  `selected` is a 1-based data-point index to highlight (None in
+/// card / read-only mode).
+pub fn draw_ascii_coord(
+    buf:      &mut Buffer,
+    band:     Rect,
+    cats:     &[String],
+    values:   &[i32],
+    selected: Option<usize>,
+) {
+    if band.height < 5 || band.width < 10 || cats.is_empty() { return; }
+
+    let n     = cats.len();
+    let max_y = values.iter().copied().max().unwrap_or(1).max(1);
+
+    // Y-axis column: leave 4 chars on the left for numeric labels.
+    let y_label_w: u16 = 4;
+    let y_ax = band.left() + y_label_w;
+
+    // X-axis row: put it 3/4 down so there is a small negative-y strip below.
+    let neg_rows: u16 = (band.height / 4).max(1);
+    let x_ax  = band.bottom().saturating_sub(neg_rows + 1);
+
+    let pos_rows = x_ax.saturating_sub(band.top()).max(1);
+    let pos_cols = band.right().saturating_sub(y_ax + 1).max(1);
+
+    let row_per_y = pos_rows as f32 / (max_y as f32 + 0.5);
+    let col_per_x = pos_cols as f32 / (n as f32 + 0.5);
+
+    let to_col = |xi: usize| -> u16 { y_ax + ((xi as f32 + 0.5) * col_per_x).round() as u16 };
+    let to_row = |yi: i32|  -> u16  { x_ax.saturating_sub((yi as f32 * row_per_y).round() as u16) };
+
+    // Y-axis
+    for row in band.top()..band.bottom() {
+        if y_ax >= band.right() { break; }
+        let ch = if row == x_ax { '┼' } else { '│' };
+        buf[(y_ax, row)].set_char(ch).set_style(Style::default().fg(Color::Gray));
+    }
+    if y_ax < band.right() {
+        buf[(y_ax, band.top())].set_char('↑').set_style(Style::default().fg(Color::Gray));
+    }
+
+    // X-axis
+    if x_ax < band.bottom() {
+        for col in band.left()..band.right() {
+            if col == y_ax { continue; }
+            buf[(col, x_ax)].set_char('─').set_style(Style::default().fg(Color::Gray));
+        }
+        if band.right() > 0 {
+            buf[(band.right() - 1, x_ax)].set_char('→').set_style(Style::default().fg(Color::Gray));
+        }
+    }
+
+    // "0" near origin
+    if y_ax + 1 < band.right() && x_ax + 1 < band.bottom() {
+        put_str(buf, y_ax + 1, x_ax + 1, "0", Style::default().fg(Color::DarkGray));
+    }
+
+    // Y-axis tick marks and numeric labels
+    let y_step = if max_y > 20 { 5i32 } else if max_y > 10 { 2 } else { 1 };
+    let mut yi = y_step;
+    while yi <= max_y + y_step {
+        let row = to_row(yi);
+        if row < band.top() || row >= x_ax { break; }
+        if y_ax < band.right() {
+            buf[(y_ax, row)].set_char('├').set_style(Style::default().fg(Color::Gray));
+        }
+        let label = format!("{:>3}", yi);
+        put_str(buf, band.left(), row, &label, Style::default().fg(Color::DarkGray));
+        yi += y_step;
+    }
+    // Show "-1" below the x-axis if there is room
+    let neg1_row = x_ax + (row_per_y.max(1.0)).round() as u16;
+    if neg1_row < band.bottom().saturating_sub(1) {
+        if y_ax < band.right() {
+            buf[(y_ax, neg1_row)].set_char('├').set_style(Style::default().fg(Color::Gray));
+        }
+        put_str(buf, band.left(), neg1_row, " -1", Style::default().fg(Color::DarkGray));
+    }
+
+    // X-axis tick marks and labels (below axis)
+    for (i, cat) in cats.iter().enumerate() {
+        let col = to_col(i);
+        if col >= band.right().saturating_sub(1) { break; }
+        if x_ax < band.bottom() {
+            buf[(col, x_ax)].set_char('┬').set_style(Style::default().fg(Color::Gray));
+            if x_ax + 1 < band.bottom() {
+                put_str(buf, col, x_ax + 1, cat, Style::default().fg(Color::DarkGray));
+            }
+        }
+    }
+
+    // Quadrant labels (very dim)
+    let ql = Style::default().fg(Color::DarkGray);
+    let qr = (band.top() + x_ax) / 2;   // mid row of positive y
+    let qnr = (x_ax + band.bottom()) / 2; // mid row of negative y
+    let qc  = (y_ax + band.right()) / 2;  // mid col of positive x
+    let qnc = (band.left() + y_ax) / 2;   // mid col of negative x
+    for &(lbl, col, row) in &[("I", qc, qr), ("II", qnc, qr), ("III", qnc, qnr), ("IV", qc, qnr)] {
+        if col < band.right() && row > band.top() && row < band.bottom() {
+            put_str(buf, col, row, lbl, ql);
+        }
+    }
+
+    // Data points
+    for (i, (&val, cat)) in values.iter().zip(cats.iter()).enumerate() {
+        let col = to_col(i);
+        let row = to_row(val);
+        if col >= band.right() || row < band.top() || row >= band.bottom() { continue; }
+
+        let is_sel = selected.map_or(false, |s| s == i + 1);
+        let dot_st = if is_sel {
+            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::LightBlue)
+        };
+        buf[(col, row)].set_char('●').set_style(dot_st);
+
+        // "(x,y)" label — prefer to the right, fall back to the left
+        let xi  = i + 1;
+        let lbl = format!("({},{})", xi, val);
+        let ll  = lbl.len() as u16;
+        let lbl_col = if col + 1 + ll < band.right() { col + 1 }
+                      else { col.saturating_sub(ll) };
+        let lbl_st = Style::default().fg(if is_sel { Color::White } else { Color::Gray });
+        if lbl_col < band.right() {
+            put_str(buf, lbl_col, row, &lbl, lbl_st);
+        }
+    }
+}
+
+/// Draw a single graphing problem card.
+pub fn render_graph_card(area: Rect, buf: &mut Buffer, p: &crate::graphing::GraphProblem, input: &str, banner: Option<(String, Color)>) {
+    use crate::graphing::GraphKind;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(GRAPH_ACCENT))
+        .title(format!(" {} — {} ", p.kind.name(), p.data.title))
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    let mut y = inner.top() + 1;
+
+    // Question.
+    let q = p.question_text();
+    for line in wrap_text(&q, inner.width.saturating_sub(4)).iter().take(2) {
+        put_str(buf, center(inner, line.chars().count() as u16), y,
+            line, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        y += 1;
+    }
+    y += 1;
+
+    // Chart area — allocate middle band.
+    let answer_h: u16 = 3;
+    let hint_h: u16 = 1;
+    let chart_h_avail = inner.bottom().saturating_sub(y + answer_h + hint_h + 1);
+    let band = Rect { x: inner.left() + 1, y, width: inner.width.saturating_sub(2), height: chart_h_avail };
+
+    match &p.kind {
+        GraphKind::Pictograph { scale } => {
+            // Numbered, fixed-width table: "1. label │ * * *   count"
+            let num_w   = (p.data.categories.len() as f32).log10() as usize + 2; // "1. " … "9. "
+            let max_lbl = p.data.categories.iter().map(|c| c.chars().count()).max().unwrap_or(1);
+            let col_w   = num_w + max_lbl;
+            let sym_avail = (band.width as usize).saturating_sub(col_w + 6);
+            let max_syms  = (sym_avail / 2).max(1);
+            for (i, (cat, &val)) in p.data.categories.iter().zip(p.data.values.iter()).enumerate() {
+                let label    = format!("{}. {:>width$}", i + 1, cat, width = max_lbl);
+                let symbols  = (val / (*scale as i32).max(1)).max(0) as usize;
+                let sym_str  = vec!["*"; symbols.min(max_syms)].join(" ");
+                let row = format!("{} │ {:<sym_w$}  {}", label, sym_str, val, sym_w = max_syms * 2);
+                if band.top() + (i as u16) < band.bottom() {
+                    put_str(buf, band.left(), band.top() + (i as u16), &row, Style::default().fg(GRAPH_BAR));
+                }
+            }
+            let note_y = band.top() + p.data.categories.len() as u16 + 1;
+            if note_y < band.bottom() {
+                let unit = if *scale == 1 { "1 unit".to_string() } else { format!("{} units", scale) };
+                put_str(buf, band.left(), note_y, &format!("(* = {})", unit), Style::default().fg(Color::DarkGray));
+            }
+        }
+        GraphKind::Pie => {
+            let n_cats = p.data.categories.len();
+            // Upper portion: ASCII circle (up to 12 rows, at least as many as n_cats).
+            let circle_rows = band.height.min(12).max(n_cats as u16);
+            let circle_band = Rect { height: circle_rows.min(band.height), ..band };
+            draw_ascii_pie(buf, circle_band, &p.data.categories, &p.data.values);
+
+            // Lower portion: horizontal proportion bars, if there is room.
+            let bars_y = band.top() + circle_rows + 1;
+            if bars_y + n_cats as u16 <= band.bottom() {
+                let total = p.data.values.iter().sum::<i32>().max(1);
+                let max_lbl   = p.data.categories.iter().map(|c| c.chars().count()).max().unwrap_or(1);
+                let bar_avail = (band.width as usize).saturating_sub(max_lbl + 9);
+                for (i, (cat, &pct)) in p.data.categories.iter().zip(p.data.values.iter()).enumerate() {
+                    let label   = format!("{:>width$}", cat, width = max_lbl);
+                    let bar_len = ((pct as f32 / total as f32) * bar_avail as f32).round() as usize;
+                    let row_str = format!("{} │ {:<bar_w$}  {:>3}%",
+                        label, "█".repeat(bar_len), pct, bar_w = bar_avail);
+                    let ly = bars_y + i as u16;
+                    if ly < band.bottom() {
+                        put_str(buf, band.left(), ly, &row_str, Style::default().fg(GRAPH_BAR));
+                    }
+                }
+            }
+        }
+        GraphKind::Coordinate => {
+            draw_ascii_coord(buf, band, &p.data.categories, &p.data.values, None);
+        }
+        _ => {
+            // Bar / Line — always number bars so the category index is visible
+            draw_ascii_bar(buf, band, &p.data.categories, &p.data.values, GRAPH_BAR, true);
+        }
+    }
+
+    // Answer input.
+    let ay = inner.bottom().saturating_sub(answer_h + 1);
+    put_str(buf, center(inner, 14), ay, "Your answer:", Style::default().fg(Color::Gray));
+    let num = if input.is_empty() { "?" } else { input };
+    put_str(buf, center(inner, num.chars().count() as u16), ay + 1, num,
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+
+    if let Some((text, color)) = banner {
+        put_str(buf, center(inner, text.chars().count() as u16), ay + 2, &text,
+            Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
+
+    let hints = "Enter check    H help    Y why?    Esc menu";
+    put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1),
+        hints, Style::default().fg(Color::DarkGray));
+}
+
+/// Draw a two-graph comparison card (side by side bar charts + question).
+pub fn render_graph_cmp_card(area: Rect, buf: &mut Buffer, p: &crate::graphing::GraphCmpProblem, input: &str, banner: Option<(String, Color)>) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(GRAPH_ACCENT))
+        .title(" Graph Comparison ")
+        .style(Style::default().bg(BG));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    let mut y = inner.top() + 1;
+
+    // Question.
+    let q = p.question_text();
+    for line in wrap_text(&q, inner.width.saturating_sub(4)).iter().take(2) {
+        put_str(buf, center(inner, line.chars().count() as u16), y,
+            line, Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        y += 1;
+    }
+    y += 1;
+
+    // Two side-by-side bar charts.
+    let answer_h: u16 = 3;
+    let chart_h_avail = inner.bottom().saturating_sub(y + answer_h + 2);
+    let half_w = inner.width / 2;
+
+    let band_a = Rect { x: inner.left(), y, width: half_w.saturating_sub(1), height: chart_h_avail };
+    let band_b = Rect { x: inner.left() + half_w, y, width: half_w, height: chart_h_avail };
+
+    // Group 1 header
+    put_str(buf, band_a.left(), band_a.top(), "Group 1", Style::default().fg(GRAPH_CMP_A).add_modifier(Modifier::BOLD));
+    let sub_a = Rect { y: band_a.top() + 1, height: band_a.height.saturating_sub(1), ..band_a };
+    draw_ascii_bar(buf, sub_a, &p.data_a.categories, &p.data_a.values, GRAPH_CMP_A, false);
+
+    // Group 2 header
+    put_str(buf, band_b.left(), band_b.top(), "Group 2", Style::default().fg(GRAPH_CMP_B).add_modifier(Modifier::BOLD));
+    let sub_b = Rect { y: band_b.top() + 1, height: band_b.height.saturating_sub(1), ..band_b };
+    draw_ascii_bar(buf, sub_b, &p.data_b.categories, &p.data_b.values, GRAPH_CMP_B, false);
+
+    // Divider
+    for ry in y..y + chart_h_avail + 1 {
+        if ry < inner.bottom() {
+            buf[(inner.left() + half_w.saturating_sub(1), ry)].set_char('│').set_style(Style::default().fg(Color::DarkGray));
+        }
+    }
+
+    // Totals beneath charts
+    let tot_a: i32 = p.data_a.values.iter().sum();
+    let tot_b: i32 = p.data_b.values.iter().sum();
+    let tot_y = y + chart_h_avail + 1;
+    if tot_y < inner.bottom().saturating_sub(answer_h + 1) {
+        put_str(buf, band_a.left(), tot_y, &format!("Total: {}", tot_a), Style::default().fg(GRAPH_CMP_A));
+        put_str(buf, band_b.left(), tot_y, &format!("Total: {}", tot_b), Style::default().fg(GRAPH_CMP_B));
+    }
+
+    // Answer input.
+    let ay = inner.bottom().saturating_sub(answer_h + 1);
+    put_str(buf, center(inner, 14), ay, "Your answer:", Style::default().fg(Color::Gray));
+    let num = if input.is_empty() { "?" } else { input };
+    put_str(buf, center(inner, num.chars().count() as u16), ay + 1, num,
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+
+    if let Some((text, color)) = banner {
+        put_str(buf, center(inner, text.chars().count() as u16), ay + 2, &text,
+            Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
+
+    let hints = "Enter check    H help    Y why?    Esc menu";
+    put_str(buf, center(inner, hints.chars().count() as u16), inner.bottom().saturating_sub(1),
+        hints, Style::default().fg(Color::DarkGray));
+}

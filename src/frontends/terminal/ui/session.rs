@@ -232,16 +232,34 @@ pub fn draw_session(f: &mut Frame, app: &App, fx: &Transitions, area: Rect) {
                 let banner = feedback_banner(app);
                 render_card(card, f.buffer_mut(), p, &app.input, app.config.layout, banner);
             }
+            Active::Graph(g) => {
+                let banner = match app.feedback {
+                    Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+                    Feedback::Wrong => Some(("✗  Not quite — look again!".to_string(), Color::LightRed)),
+                    Feedback::None => None,
+                };
+                render_graph_card(card, f.buffer_mut(), g, &app.input, banner);
+            }
+            Active::GraphCmp(g) => {
+                let banner = match app.feedback {
+                    Feedback::Correct => Some(("✓  Correct!".to_string(), Color::LightGreen)),
+                    Feedback::Wrong => Some(("✗  Not quite — compare again!".to_string(), Color::LightRed)),
+                    Feedback::None => None,
+                };
+                render_graph_cmp_card(card, f.buffer_mut(), g, &app.input, banner);
+            }
         }
     }
 
     // Deduction Duck helps with any problem; the Why panel works for every topic.
     if app.transition.is_none() && app.help_in > 0.0 {
         match &app.current {
-            Active::Shape(s) => draw_hint_panel(f, app, card, &s.hint, s.answer_label()),
-            Active::Unit(u) => draw_hint_panel(f, app, card, &u.hint, format!("Answer: {} {}", u.answer, u.unit_label)),
-            Active::Geo(g) => draw_hint_panel(f, app, card, &g.hint, g.answer_label()),
-            Active::Arith(p) => draw_help_overlay(f, app, card, p),
+            Active::Shape(s)    => draw_hint_panel(f, app, card, &s.hint, s.answer_label()),
+            Active::Unit(u)     => draw_hint_panel(f, app, card, &u.hint, format!("Answer: {} {}", u.answer, u.unit_label)),
+            Active::Geo(g)      => draw_hint_panel(f, app, card, &g.hint, g.answer_label()),
+            Active::Arith(p)    => draw_help_overlay(f, app, card, p),
+            Active::Graph(g)    => draw_hint_panel(f, app, card, &g.hint, g.answer_label()),
+            Active::GraphCmp(g) => draw_hint_panel(f, app, card, &g.hint, g.answer_label()),
         }
     }
     if app.transition.is_none() && app.why_active {

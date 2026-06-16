@@ -27,6 +27,8 @@ const MAX_INPUT: usize = 7;
 const FRAC_MAT_PER_REGION: u32 = 6;
 /// Editable fields on the Experimentation explorer.
 const EXP_FIELDS: usize = 4;
+/// Editable fields on the Graph Explorer (1 kind + 5 value slots).
+const GRAPH_EXP_FIELDS: usize = 6;
 /// Editable rows on the Settings screen (grade + four range knobs + layout + theme).
 pub const SETTINGS_FIELDS: usize = 7;
 /// Ticks over which a fresh problem "draws on" (blackboard theme write-on).
@@ -46,6 +48,7 @@ pub enum Screen {
     Experiment,
     Time,
     Help,
+    GraphExplorer,
 }
 
 /// How long each milestone-cinematic scene lingers before transitioning.
@@ -67,22 +70,24 @@ pub struct Cinematic {
 }
 
 // Menu row indices.  Order: section toggles → action rows → admin rows.
-const MI_STUDENT:  usize = 0;
-const MI_GRADE:    usize = 1;
-const MI_OPS:      std::ops::RangeInclusive<usize> = 2..=5;
-const MI_UNITS:    usize = 6;
-const MI_FRACTIONS: usize = 7;
-const MI_PERCENTS: usize = 8;
-const MI_GEOMETRY: usize = 9;
-const MI_PRACTICE:  usize = 10;
-const MI_CHALLENGE: usize = 11;
-const MI_TIME:      usize = 12;
-const MI_EXPERIMENT: usize = 13;
-const MI_SETTINGS:  usize = 14;
-const MI_PROGRESS:  usize = 15;
-const MI_TEACHER:   usize = 16;
-const MI_HELP:      usize = 17;
-const MENU_ITEMS:   usize = 18;
+const MI_STUDENT:    usize = 0;
+const MI_GRADE:      usize = 1;
+const MI_OPS:        std::ops::RangeInclusive<usize> = 2..=5;
+const MI_UNITS:      usize = 6;
+const MI_FRACTIONS:  usize = 7;
+const MI_PERCENTS:   usize = 8;
+const MI_GEOMETRY:   usize = 9;
+const MI_GRAPHING:   usize = 10;
+const MI_PRACTICE:   usize = 11;
+const MI_CHALLENGE:  usize = 12;
+const MI_TIME:       usize = 13;
+const MI_GRAPH_EXPL: usize = 14;
+const MI_EXPERIMENT: usize = 15;
+const MI_SETTINGS:   usize = 16;
+const MI_PROGRESS:   usize = 17;
+const MI_TEACHER:    usize = 18;
+const MI_HELP:       usize = 19;
+const MENU_ITEMS:    usize = 20;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Feedback {
@@ -164,6 +169,8 @@ pub struct ChallengeRun {
     /// Correct answers by topic index (Add=0 Sub=1 Mul=2 Div=3
     /// Units=4 Fractions=5 Percentages=6 Geometry=7).
     pub by_topic: [u32; 8],
+    /// Overflow for Graphing (index 0).
+    pub by_topic_ext: [u32; 1],
     /// Correct answers by grade (index 0 = K, 1–8 = grades 1–8).
     pub by_grade: [u32; 9],
 }
@@ -174,19 +181,7 @@ impl ChallengeRun {
     }
 }
 
-#[allow(dead_code)]
-fn topic_idx(t: Topic) -> usize {
-    match t {
-        Topic::Add          => 0,
-        Topic::Sub          => 1,
-        Topic::Mul          => 2,
-        Topic::Div          => 3,
-        Topic::Units        => 4,
-        Topic::Fractions    => 5,
-        Topic::Percentages  => 6,
-        Topic::Geometry     => 7,
-    }
-}
+fn topic_idx(t: Topic) -> usize { t.index() }
 
 impl Challenge {
     /// Whole seconds remaining, rounded up, accounting for any paused intervals.
@@ -235,6 +230,8 @@ pub struct App {
     pub menu_percents: bool,
     /// Whether geometry problems are mixed into the session.
     pub menu_geometry: bool,
+    /// Whether graphing problems are mixed into the session.
+    pub menu_graphing: bool,
     pub menu_index: usize,
 
     // Startup graphics-mode picker.
@@ -259,6 +256,7 @@ pub struct App {
     fractions_enabled: bool,
     percents_enabled: bool,
     geometry_enabled: bool,
+    graphing_enabled: bool,
 
     // Experimentation — free-form unit explorer.
     pub exp_category: usize,
@@ -266,6 +264,16 @@ pub struct App {
     pub exp_from: usize,
     pub exp_to: usize,
     pub exp_field: usize,
+
+    // Graph Explorer — free-form graph builder.
+    /// Selected graph kind index (0=Bar 1=Pictograph 2=Line 3=Pie 4=Coordinate).
+    pub graph_exp_kind: usize,
+    /// Raw data values for the 5 explorer category slots.
+    pub graph_exp_values: [i32; 5],
+    /// Currently selected field (0=kind, 1–5=value slots).
+    pub graph_exp_field: usize,
+    /// Digit edit buffer for the active value slot.
+    pub graph_exp_input: String,
 
     // Time Explorer — interactive time/date display (clocks, Roman, zones, calendar).
     pub time_year:  u16,
@@ -367,9 +375,9 @@ impl App {
         let roster = crate::student::Roster::load(storage.as_ref());
         let why_extras = crate::motivation::Extras::load(storage.as_ref());
         // Seed menu state from the current student's saved preferences.
-        let (menu_grade, menu_ops, menu_units, menu_fractions, menu_percents, menu_geometry) = {
+        let (menu_grade, menu_ops, menu_units, menu_fractions, menu_percents, menu_geometry, menu_graphing) = {
             let s = roster.current();
-            (s.pref_grade, s.pref_ops, s.pref_units, s.pref_fractions, s.pref_percents, s.pref_geometry)
+            (s.pref_grade, s.pref_ops, s.pref_units, s.pref_fractions, s.pref_percents, s.pref_geometry, s.pref_graphing)
         };
         App {
             screen: Screen::Startup,
@@ -386,6 +394,7 @@ impl App {
             menu_fractions,
             menu_percents,
             menu_geometry,
+            menu_graphing,
             menu_index: 0,
             startup_index,
             settings_grade: 1,
@@ -397,12 +406,17 @@ impl App {
             fractions_enabled: false,
             percents_enabled: false,
             geometry_enabled: false,
+            graphing_enabled: false,
             // Defaults primed for a fun "8000 gallons -> teaspoons" experiment.
             exp_category: 0,
             exp_amount: "8000".to_string(),
             exp_from: 6,
             exp_to: 0,
             exp_field: 0,
+            graph_exp_kind: 0,
+            graph_exp_values: [4, 7, 3, 9, 5],
+            graph_exp_field: 0,
+            graph_exp_input: String::new(),
             time_year: 2026, time_month: 1, time_day: 1,
             time_hour: 12, time_min: 0, time_sec: 0,
             time_field: 0, time_auto: false, time_help_active: false, time_local_offset: 0,
@@ -457,23 +471,25 @@ impl App {
     /// Copy menu selections into the current student's persisted preferences.
     fn save_student_prefs(&mut self) {
         let s = self.roster.current_mut();
-        s.pref_grade    = self.menu_grade;
-        s.pref_ops      = self.menu_ops;
-        s.pref_units    = self.menu_units;
-        s.pref_fractions = self.menu_fractions;
-        s.pref_percents = self.menu_percents;
-        s.pref_geometry = self.menu_geometry;
+        s.pref_grade       = self.menu_grade;
+        s.pref_ops         = self.menu_ops;
+        s.pref_units       = self.menu_units;
+        s.pref_fractions   = self.menu_fractions;
+        s.pref_percents    = self.menu_percents;
+        s.pref_geometry    = self.menu_geometry;
+        s.pref_graphing    = self.menu_graphing;
     }
 
     /// Restore the current student's saved preferences into the menu state.
     fn load_student_prefs(&mut self) {
         let s = self.roster.current();
-        self.menu_grade    = s.pref_grade;
-        self.menu_ops      = s.pref_ops;
-        self.menu_units    = s.pref_units;
-        self.menu_fractions = s.pref_fractions;
-        self.menu_percents = s.pref_percents;
-        self.menu_geometry = s.pref_geometry;
+        self.menu_grade      = s.pref_grade;
+        self.menu_ops        = s.pref_ops;
+        self.menu_units      = s.pref_units;
+        self.menu_fractions  = s.pref_fractions;
+        self.menu_percents   = s.pref_percents;
+        self.menu_geometry   = s.pref_geometry;
+        self.menu_graphing   = s.pref_graphing;
     }
 
     fn save_extras(&self) {
@@ -539,12 +555,13 @@ impl App {
                     if let Some(ref mut r) = self.run {
                         r.duration_secs = c.duration_secs();
                         let rec = crate::student::ChallengeRecord {
-                            solved:       r.solved,
-                            attempts:     r.attempts,
-                            streak_peak:  r.streak_peak,
+                            solved:        r.solved,
+                            attempts:      r.attempts,
+                            streak_peak:   r.streak_peak,
                             duration_secs: r.duration_secs,
-                            by_topic:     r.by_topic,
-                            by_grade:     r.by_grade,
+                            by_topic:      r.by_topic,
+                            by_topic_ext:  r.by_topic_ext,
+                            by_grade:      r.by_grade,
                         };
                         let hist = &mut self.roster.current_mut().challenge_history;
                         hist.push(rec);
@@ -653,9 +670,10 @@ impl App {
             }
             Screen::Practice | Screen::Challenge => self.on_session_key(key),
             Screen::ChallengeEnd => self.on_challenge_end_key(key),
-            Screen::Experiment => self.on_experiment_key(key),
-            Screen::Time       => self.on_time_key(key),
-            Screen::Help       => match key {
+            Screen::Experiment    => self.on_experiment_key(key),
+            Screen::Time          => self.on_time_key(key),
+            Screen::GraphExplorer => self.on_graph_explorer_key(key),
+            Screen::Help          => match key {
                 Key::Esc | Key::Enter | Key::Char('h') | Key::Char('H') => self.enter_menu(),
                 _ => {}
             },
@@ -740,14 +758,16 @@ impl App {
                     self.naming = true;
                     self.name_input.clear();
                 }
-                MI_UNITS => self.menu_units = !self.menu_units,
-                MI_FRACTIONS => self.menu_fractions = !self.menu_fractions,
-                MI_PERCENTS => self.menu_percents = !self.menu_percents,
-                MI_GEOMETRY => self.menu_geometry = !self.menu_geometry,
-                MI_PRACTICE  => self.start_session(false),
-                MI_CHALLENGE => self.start_session(true),
-                MI_TIME      => self.open_time(),
+                MI_UNITS      => self.menu_units      = !self.menu_units,
+                MI_FRACTIONS  => self.menu_fractions  = !self.menu_fractions,
+                MI_PERCENTS   => self.menu_percents   = !self.menu_percents,
+                MI_GEOMETRY   => self.menu_geometry   = !self.menu_geometry,
+                MI_GRAPHING   => self.menu_graphing   = !self.menu_graphing,
+                MI_PRACTICE   => self.start_session(false),
+                MI_CHALLENGE  => self.start_session(true),
+                MI_TIME       => self.open_time(),
                 MI_EXPERIMENT => self.screen = Screen::Experiment,
+                MI_GRAPH_EXPL => self.screen = Screen::GraphExplorer,
                 _ => {}
             },
             Key::Char('q') | Key::Char('Q') | Key::Esc => self.should_quit = true,
@@ -1128,6 +1148,12 @@ impl App {
                     self.input.push('/');
                 }
             }
+            // Coordinate plane answers are entered as "x,y".
+            Key::Char(',') if self.current.accepts_comma() => {
+                if !self.input.is_empty() && !self.input.contains(',') {
+                    self.input.push(',');
+                }
+            }
             Key::Backspace => {
                 self.feedback = Feedback::None;
                 self.input.pop();
@@ -1186,12 +1212,19 @@ impl App {
         self.save_roster();
         self.grade = self.menu_grade;
         self.ops = Op::ALL.iter().copied().enumerate().filter(|(i, _)| self.menu_ops[*i]).map(|(_, op)| op).collect();
-        self.units_enabled = self.menu_units;
+        self.units_enabled     = self.menu_units;
         self.fractions_enabled = self.menu_fractions;
-        self.percents_enabled = self.menu_percents;
-        self.geometry_enabled = self.menu_geometry;
+        self.percents_enabled  = self.menu_percents;
+        self.geometry_enabled  = self.menu_geometry;
+        self.graphing_enabled  = self.menu_graphing;
         // Need at least one problem type — fall back to addition.
-        if self.ops.is_empty() && !self.units_enabled && !self.fractions_enabled && !self.percents_enabled && !self.geometry_enabled {
+        if self.ops.is_empty()
+            && !self.units_enabled
+            && !self.fractions_enabled
+            && !self.percents_enabled
+            && !self.geometry_enabled
+            && !self.graphing_enabled
+        {
             self.ops.push(Op::Add);
         }
         self.screen = if challenge { Screen::Challenge } else { Screen::Practice };
@@ -1272,7 +1305,9 @@ impl App {
                 r.solved += 1;
                 r.attempts += 1;
                 r.streak_peak = r.streak_peak.max(streak);
-                r.by_topic[topic_idx(topic)] += 1;
+                let ti = topic_idx(topic);
+                if ti < 8 { r.by_topic[ti]       += 1; }
+                else       { r.by_topic_ext[ti-8] += 1; }
                 if g < 9 { r.by_grade[g] += 1; }
             }
             if matches!(topic, Topic::Add | Topic::Sub | Topic::Mul | Topic::Div) {
@@ -1322,34 +1357,31 @@ impl App {
     /// Generate the next problem, randomly choosing a section from the enabled
     /// mix (arithmetic, units, fractions, percentages).
     fn generate_pending(&mut self) {
-        // Kinds: 0 = arithmetic, 1 = units, 2 = fractions, 3 = percentages,
-        // 4 = geometry.
+        // Kinds: 0=arith 1=units 2=fractions 3=percents 4=geometry 5=graph
         let mut kinds: Vec<u8> = Vec::new();
-        if !self.ops.is_empty() {
-            kinds.push(0);
-        }
-        if self.units_enabled {
-            kinds.push(1);
-        }
-        if self.fractions_enabled {
-            kinds.push(2);
-        }
-        if self.percents_enabled {
-            kinds.push(3);
-        }
-        if self.geometry_enabled {
-            kinds.push(4);
-        }
-        if kinds.is_empty() {
-            kinds.push(0);
-        }
+        if !self.ops.is_empty()   { kinds.push(0); }
+        if self.units_enabled     { kinds.push(1); }
+        if self.fractions_enabled { kinds.push(2); }
+        if self.percents_enabled  { kinds.push(3); }
+        if self.geometry_enabled  { kinds.push(4); }
+        if self.graphing_enabled  { kinds.push(5); }
+        if kinds.is_empty()       { kinds.push(0); }
         let kind = kinds[self.rng.gen_range(0..kinds.len())];
+        let grade = self.grade;
         self.pending = Some(match kind {
             1 => Active::Unit(crate::units::generate(self.config.locality, &mut self.rng)),
             2 => Active::Shape(crate::fraction::generate(&mut self.rng)),
             3 => Active::Shape(crate::fraction::generate_percent(&mut self.rng)),
             4 => Active::Geo(crate::geometry::generate(&mut self.rng)),
-            _ => Active::Arith(problem::generate(self.config.range(self.grade), &self.ops, &mut self.rng)),
+            5 => {
+                // Mix single-graph and comparison problems; ~30% comparison.
+                if self.rng.gen_bool(0.3) {
+                    Active::GraphCmp(crate::graphing::generate_cmp(grade, &mut self.rng))
+                } else {
+                    Active::Graph(crate::graphing::generate(grade, &mut self.rng))
+                }
+            }
+            _ => Active::Arith(problem::generate(self.config.range(grade), &self.ops, &mut self.rng)),
         });
     }
 
@@ -1504,6 +1536,63 @@ impl App {
                 let count = self.exp_unit_count();
                 self.exp_from = self.exp_from.min(count - 1);
                 self.exp_to = self.exp_to.min(count - 1);
+            }
+            _ => {}
+        }
+    }
+
+    // -- Graph Explorer (free-form graph builder) ----------------------------
+
+    fn on_graph_explorer_key(&mut self, key: Key) {
+        match key {
+            Key::Esc => self.enter_menu(),
+            Key::Up   => {
+                self.graph_exp_field = (self.graph_exp_field + GRAPH_EXP_FIELDS - 1) % GRAPH_EXP_FIELDS;
+                self.graph_exp_input.clear();
+            }
+            Key::Down => {
+                self.graph_exp_field = (self.graph_exp_field + 1) % GRAPH_EXP_FIELDS;
+                self.graph_exp_input.clear();
+            }
+            Key::Left | Key::Right => {
+                let fwd = key == Key::Right;
+                if self.graph_exp_field == 0 {
+                    // Field 0: cycle graph kind.
+                    let n = crate::graphing::EXPLORER_KIND_NAMES.len();
+                    self.graph_exp_kind = if fwd {
+                        (self.graph_exp_kind + 1) % n
+                    } else {
+                        (self.graph_exp_kind + n - 1) % n
+                    };
+                } else {
+                    // Fields 1–5: nudge value ±1.
+                    let i = self.graph_exp_field - 1;
+                    if fwd {
+                        self.graph_exp_values[i] = self.graph_exp_values[i].saturating_add(1).min(999);
+                    } else {
+                        self.graph_exp_values[i] = self.graph_exp_values[i].saturating_sub(1).max(0);
+                    }
+                    self.graph_exp_input.clear();
+                }
+            }
+            Key::Char(d @ '0'..='9') if self.graph_exp_field > 0 => {
+                if self.graph_exp_input.len() < 3 {
+                    self.graph_exp_input.push(d);
+                }
+            }
+            Key::Backspace if self.graph_exp_field > 0 => {
+                if !self.graph_exp_input.pop().is_some() {
+                    // buffer already empty — nudge down
+                    let i = self.graph_exp_field - 1;
+                    self.graph_exp_values[i] = self.graph_exp_values[i].saturating_sub(1).max(0);
+                }
+            }
+            Key::Enter if self.graph_exp_field > 0 => {
+                if let Ok(v) = self.graph_exp_input.parse::<i32>() {
+                    let i = self.graph_exp_field - 1;
+                    self.graph_exp_values[i] = v.clamp(0, 999);
+                }
+                self.graph_exp_input.clear();
             }
             _ => {}
         }

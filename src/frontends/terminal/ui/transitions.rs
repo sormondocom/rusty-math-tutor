@@ -50,10 +50,12 @@ impl Transitions {
 fn capture_card(area: Rect, active: &Active, input: &str, progress: f32, layout: Layout, banner: Option<(String, Color)>) -> Buffer {
     let mut buf = Buffer::empty(area);
     match active {
-        Active::Shape(s) => render_shape_card(area, &mut buf, s, input, progress, banner),
-        Active::Unit(u)  => render_unit_card(area, &mut buf, u, input, banner),
-        Active::Geo(g)   => render_geometry_card(area, &mut buf, g, input, banner),
-        Active::Arith(p) => render_card(area, &mut buf, p, input, layout, banner),
+        Active::Shape(s)    => render_shape_card(area, &mut buf, s, input, progress, banner),
+        Active::Unit(u)     => render_unit_card(area, &mut buf, u, input, banner),
+        Active::Geo(g)      => render_geometry_card(area, &mut buf, g, input, banner),
+        Active::Arith(p)    => render_card(area, &mut buf, p, input, layout, banner),
+        Active::Graph(g)    => render_graph_card(area, &mut buf, g, input, banner),
+        Active::GraphCmp(g) => render_graph_cmp_card(area, &mut buf, g, input, banner),
     }
     buf
 }
