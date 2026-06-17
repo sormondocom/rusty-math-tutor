@@ -1453,16 +1453,24 @@ pub fn draw_graph_figure(pm: &mut Pixmap, band: (f32, f32, f32, f32), kind: &cra
 
     match kind {
         GraphKind::Pictograph { scale } => {
-            let row_h = (bh / n as f32).min(28.0);
-            let sym_r  = (row_h * 0.34).max(4.0).min(10.0);
+            let row_h      = (bh / n as f32).min(28.0);
+            let sym_r      = (row_h * 0.34).max(4.0).min(10.0);
+            let lbl_scale  = 1.2_f32;
+            let text_half_h = lbl_scale * PX_PER_SCALE * 0.5;
+            // Compute star start from the widest label so they never overlap.
+            let max_lbl_w = data.categories.iter()
+                .map(|c| format!("{:>7}:", c).len() as f32 * 8.0 * lbl_scale)
+                .fold(0.0_f32, f32::max);
+            let star_x0 = bx + max_lbl_w + 10.0;
             for (i, (cat, &val)) in data.categories.iter().zip(data.values.iter()).enumerate() {
                 let color = GRAPH_PALETTE[i % GRAPH_PALETTE.len()];
                 let ry = by + (i as f32 + 0.5) * row_h;
                 let label = format!("{:>7}:", cat);
-                text(pm, bx, ry - sym_r, 1.2, &label, GRAY);
+                // Vertically center label at ry (same as star centers).
+                text(pm, bx, ry - text_half_h, lbl_scale, &label, GRAY);
                 let n_sym = (val / (*scale as i32).max(1)).max(0) as usize;
                 for j in 0..n_sym.min(20) {
-                    draw_star(pm, bx + 90.0 + j as f32 * (sym_r * 2.6), ry, sym_r, color);
+                    draw_star(pm, star_x0 + j as f32 * (sym_r * 2.6), ry, sym_r, color);
                 }
             }
         }
